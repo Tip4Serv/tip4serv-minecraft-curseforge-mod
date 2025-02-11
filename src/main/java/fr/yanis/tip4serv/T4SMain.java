@@ -320,6 +320,7 @@ public class T4SMain {
             String macSignature = calculateHMAC(serverId, publicKey, privateKey, timestamp);
             String fileContent = readResponseFile();
             String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
+
             LOGGER.debug("Envoi de la réponse à l'API. URL: {} | Timestamp: {} | JSON: {}", API_URL, timestamp, fileContent);
             HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
             connection.setRequestMethod("POST");
@@ -338,6 +339,7 @@ public class T4SMain {
                     response.append(line);
                 }
             }
+            sendHttpRequest("update");
             LOGGER.debug("Réponse reçue de l'API après envoi de la réponse : {}", response.toString());
         } catch (Exception e) {
             LOGGER.error("Erreur de connexion à l'API Tip4Serv", e);
