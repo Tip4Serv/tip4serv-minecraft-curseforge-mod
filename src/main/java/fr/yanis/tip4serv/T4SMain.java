@@ -42,11 +42,9 @@ public class T4SMain {
     private static String privateKey = "";
     public static int interval = 1;
 
-    // Variable en mémoire pour stocker la dernière réponse JSON
     public static String lastResponse = "";
     private static final String API_URL = "https://api.tip4serv.com/payments_api_v2.php";
-    // Chemin du fichier de réponse (similaire au plugin Bukkit)
-    private static final String RESPONSE_FILE_PATH = "config/tip4serv/response.json";
+    private static final String RESPONSE_FILE_PATH = "tip4serv/response.json";
 
     public T4SMain() {
         LOGGER.info("Initialisation de l'instance du mod Tip4Serv.");
@@ -59,7 +57,6 @@ public class T4SMain {
     private void setup(final FMLCommonSetupEvent event) {
         LOGGER.info("Tip4Serv mod est en cours d'initialisation...");
         loadConfig();
-        // Planification de la vérification de l'API toutes les 10 secondes (pour test, à adapter si besoin)
         ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
         LOGGER.info("Planification de la vérification de l'API toutes les 10 secondes.");
         executor.scheduleAtFixedRate(() -> {
@@ -172,8 +169,6 @@ public class T4SMain {
                         }
                         new_obj.add("cmds", new_cmds);
 
-                        // Optionnel : on peut ajouter ici les erreurs pour chaque commande non exécutée
-                        // (similaire au plugin, ici nous n'ajoutons qu'un statut global)
                         if (redo_cmd) {
                             new_obj.addProperty("status", 14);
                         } else {
@@ -189,7 +184,6 @@ public class T4SMain {
                         new_json.add(id, new_obj);
                     }
 
-                    // Mise à jour de la variable en mémoire et écriture dans le fichier response.json
                     lastResponse = new_json.toString();
                     boolean finalUpdate_now = update_now;
                     writeResponseFileAsync(lastResponse).thenRun(() -> {
@@ -221,7 +215,6 @@ public class T4SMain {
     }
 
     public static String check_online_player(String uuid_str, String mc_username) {
-        // Nettoyer les chaînes pour enlever d'éventuels guillemets ou espaces
         uuid_str = uuid_str.replace("\"", "").trim();
         mc_username = mc_username.replace("\"", "").trim();
 
@@ -232,7 +225,6 @@ public class T4SMain {
             return null;
         }
 
-        // Utilisation d'un CompletableFuture pour exécuter la vérification sur le thread principal
         CompletableFuture<String> future = new CompletableFuture<>();
 
         String finalUuid_str = uuid_str;
@@ -241,8 +233,6 @@ public class T4SMain {
             for (Player player : ServerLifecycleHooks.getCurrentServer().getPlayerList().getPlayers()) {
                 String loopedPlayerUsername = player.getGameProfile().getName();
                 UUID playerUUID = player.getUUID();
-
-                // Si l'API renvoie "name" ou une chaîne vide pour le UUID, comparer sur le nom (insensible à la casse)
                 if (finalUuid_str.equalsIgnoreCase("name") || finalUuid_str.isEmpty()) {
                     if (loopedPlayerUsername.equalsIgnoreCase(finalMc_username)) {
                         LOGGER.debug("Le joueur {} est en ligne (vérifié par nom).", loopedPlayerUsername);
@@ -250,7 +240,6 @@ public class T4SMain {
                         return;
                     }
                 } else {
-                    // Comparaison des UUID en supprimant les tirets et en ignorant la casse
                     if (playerUUID.toString().replace("-", "").equalsIgnoreCase(finalUuid_str)) {
                         LOGGER.debug("Le joueur {} est en ligne (vérifié par UUID).", loopedPlayerUsername);
                         future.complete(loopedPlayerUsername);
@@ -263,7 +252,6 @@ public class T4SMain {
         });
 
         try {
-            // On bloque brièvement jusqu'à obtenir le résultat (cette opération devrait être très rapide)
             return future.get();
         } catch (Exception e) {
             LOGGER.error("Erreur lors de la vérification de la présence en ligne du joueur", e);
@@ -330,7 +318,6 @@ public class T4SMain {
             long timestamp = new Date().getTime();
             URL url = new URL(API_URL);
             String macSignature = calculateHMAC(serverId, publicKey, privateKey, timestamp);
-            // Lire le contenu du fichier response.json
             String fileContent = readResponseFile();
             String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
             LOGGER.debug("Envoi de la réponse à l'API. URL: {} | Timestamp: {} | JSON: {}", API_URL, timestamp, fileContent);
@@ -364,7 +351,6 @@ public class T4SMain {
         }
         try {
             long timestamp = new Date().getTime();
-            // Lire le contenu du fichier response.json
             String fileContent = readResponseFile();
             String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
             String macSignature = calculateHMAC(serverId, publicKey, privateKey, timestamp);
@@ -384,7 +370,6 @@ public class T4SMain {
                 }
             }
             LOGGER.debug("Requête HTTP GET complétée. Réponse : {}", response.toString());
-            // Si la commande est "update", on efface le fichier de réponse (comme dans le plugin)
             if (cmd.equals("update")) {
                 clearResponseFile();
             }
