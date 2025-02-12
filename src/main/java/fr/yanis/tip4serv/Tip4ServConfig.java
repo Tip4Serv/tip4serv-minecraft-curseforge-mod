@@ -1,106 +1,176 @@
 package fr.yanis.tip4serv;
 
-import net.minecraftforge.common.ForgeConfigSpec;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.config.ConfigTracker;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Path;
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
 
-@Mod.EventBusSubscriber(bus = Mod.EventBusSubscriber.Bus.MOD)
 public class Tip4ServConfig {
     private static final Logger LOGGER = LoggerFactory.getLogger(Tip4ServConfig.class);
-    public static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
-    public static final ForgeConfigSpec SPEC;
+    private static final String CONFIG_FILE = "tip4serv/config.json";
 
-    public static final ForgeConfigSpec.ConfigValue<String> API_KEY;
-    public static final ForgeConfigSpec.ConfigValue<Integer> INTERVAL;
-    public static final ForgeConfigSpec.ConfigValue<String> STORE_MESSAGE;
-    public static final ForgeConfigSpec.ConfigValue<String> STORE_LINK;
-    private static final ForgeConfigSpec.ConfigValue<String> MESSAGE_SUCCESS;
+    private static String apiKey = "";
+    private static int interval = 1;
+    private static String storeMessage = "Link to the store: {storeLink}";
+    private static String storeLink = "https://tip4serv.com";
+    private static String messageSuccess = "§a[Tip4Serv] §7You have just received your purchase, thank you";
 
-    private static final String CONFIG_FILE_NAME = "tip4serv-config.toml";
-
-    static {
-        BUILDER.comment("Tip4Serv Configuration").push("general");
-        API_KEY = BUILDER.comment("API Key for Tip4Serv integration")
-                .define("apiKey", "");
-        INTERVAL = BUILDER.comment("Interval in minutes between each check")
-                .defineInRange("interval", 1, 1, Integer.MAX_VALUE);
-        STORE_MESSAGE = BUILDER.comment("Link to the store page")
-                .define("storeMessage", "Link to the store: {storeLink}");
-        STORE_LINK = BUILDER.comment("Link to the store page")
-                .define("storeLink", "https://tip4serv.com");
-        MESSAGE_SUCCESS = BUILDER.comment("Message to display when the purchase is successful")
-                .define("messageSuccess", "§a[Tip4Serv] Â§7You have just received your purchase thank you ");
-        BUILDER.pop();
-
-        SPEC = BUILDER.build();
+    private static class ConfigData {
+        String apiKey;
+        int interval;
+        String storeMessage;
+        String storeLink;
+        String messageSuccess;
     }
 
-    public static void register() {
-        net.minecraftforge.fml.ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, SPEC, CONFIG_FILE_NAME);
-        LOGGER.info("Tip4Serv configuration registered.");
+    public static void initConfig() {
+        try {
+            Path configPath = Paths.get(CONFIG_FILE);
+            if (!Files.exists(configPath)) {
+                Files.createDirectories(configPath.getParent());
+                Files.createFile(configPath);
+            }
+            loadConfig();
+        } catch (IOException e) {
+            LOGGER.error("Erreur lors de la création du dossier de configuration : {}", CONFIG_FILE, e);
+        }
     }
 
     public static void loadConfig() {
-        LOGGER.info("Loading Tip4Serv configuration...");
-        ConfigTracker.INSTANCE.loadConfigs(ModConfig.Type.SERVER, Path.of(net.minecraftforge.fml.ModLoadingContext.get().getActiveContainer().getModId()));
+        Path path = Paths.get(CONFIG_FILE);
+        try {
+            String content = Files.readString(path, StandardCharsets.UTF_8);
+            if (content.trim().isEmpty()) {
+                LOGGER.warn("Le fichier de configuration est vide, on crée une configuration par défaut.");
+                saveConfig();
+                return;
+            }
+            Gson gson = new Gson();
+            ConfigData data = gson.fromJson(content, ConfigData.class);
+            if (data != null) {
+                apiKey = data.apiKey;
+                interval = data.interval;
+                storeMessage = data.storeMessage;
+                storeLink = data.storeLink;
+                messageSuccess = data.messageSuccess;
+
+                if (apiKey != null && !apiKey.isEmpty()) {
+                    String[] parts = apiKey.split("\\.");
+                    if (parts.length == 3) {
+                        LOGGER.info("Configuration chargée avec succès. Server ID: {}", Tip4ServConfig.getServerID());
+                        T4SMain.checkConnection(null);
+                    } else {
+                        LOGGER.error("La clé API n'est pas au format attendu (3 parties séparées par un point). Clé fournie: {}", apiKey);
+                    }
+                }
+            } else {
+                LOGGER.warn("Le contenu de la configuration est invalide.");
+            }
+            LOGGER.info("Configuration chargée depuis : {}", path.toAbsolutePath());
+        } catch (IOException e) {
+            LOGGER.error("Erreur lors de la lecture du fichier de configuration", e);
+        }
+    }
+
+    public static void saveConfig() {
+        ConfigData data = new ConfigData();
+        data.apiKey = apiKey;
+        data.interval = interval;
+        data.storeMessage = storeMessage;
+        data.storeLink = storeLink;
+        data.messageSuccess = messageSuccess;
+
+        Gson gson = new GsonBuilder().setPrettyPrinting().create();
+        String json = gson.toJson(data);
+        try {
+            Files.writeString(Paths.get(CONFIG_FILE), json, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            LOGGER.info("Configuration sauvegardée dans : {}", CONFIG_FILE);
+            loadConfig();
+        } catch (IOException e) {
+            LOGGER.error("Erreur lors de l'écriture du fichier de configuration", e);
+        }
     }
 
     public static String getApiKey() {
-        loadConfig();
-        String key = API_KEY.get();
-        return key == null || key.isEmpty() ? "" : key;
+        try {
+            Gson gson = new Gson();
+            ConfigData data = gson.fromJson(Files.readString(Paths.get(CONFIG_FILE)), ConfigData.class);
+
+            return data.apiKey.trim();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return "";
     }
 
-    public static void setApiKey(String key) {
-        if (key != null && !key.isEmpty()) {
-            API_KEY.set(key);
-            saveConfig();
-        }
+    public static String getServerID(){
+        return getApiKey().split("\\.")[0];
+    }
+
+    public static String getPrivateKey(){
+        if (getApiKey().split("\\.").length < 3)
+            return "";
+
+        return getApiKey().split("\\.")[1];
+    }
+
+    public static String getPublicKey(){
+        if (getApiKey().split("\\.").length < 3)
+            return "";
+
+        return getApiKey().split("\\.")[2];
     }
 
     public static int getInterval() {
-        loadConfig();
-        int interval = INTERVAL.get();
-        return interval;
-    }
+        try {
+            Gson gson = new Gson();
+            ConfigData data = gson.fromJson(Files.readString(Paths.get(CONFIG_FILE)), ConfigData.class);
 
-    public static void setInterval(int interval) {
-        if (interval > 0) {
-            INTERVAL.set(interval);
-            saveConfig();
+            return data.interval;
+        } catch (IOException e) {
+            e.printStackTrace();
         }
+        return 1;
     }
 
     public static String getStoreMessage() {
-        loadConfig();
-        String link = STORE_MESSAGE.get();
-        return link == null || link.isEmpty() ? "" : link;
-    }
+        try {
+            Gson gson = new Gson();
+            ConfigData data = gson.fromJson(Files.readString(Paths.get(CONFIG_FILE)), ConfigData.class);
 
-    public static void setStoreMessage(String link) {
-        if (link != null && !link.isEmpty()) {
-            STORE_MESSAGE.set(link);
-            saveConfig();
+            return data.storeMessage;
+        } catch (IOException e) {
+            e.printStackTrace();
         }
+        return "Link to the store: {storeLink}";
     }
 
     public static String getStoreLink() {
-        loadConfig();
-        String link = STORE_LINK.get();
-        return link == null || link.isEmpty() ? "" : link;
+        try {
+            Gson gson = new Gson();
+            ConfigData data = gson.fromJson(Files.readString(Paths.get(CONFIG_FILE)), ConfigData.class);
+
+            return data.storeLink;
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return "https://tip4serv.com";
     }
 
-    public static ForgeConfigSpec.ConfigValue<String> getMessageSuccess() {
-        return MESSAGE_SUCCESS;
-    }
+    public static String getMessageSuccess() {
+        try {
+            Gson gson = new Gson();
+            ConfigData data = gson.fromJson(Files.readString(Paths.get(CONFIG_FILE)), ConfigData.class);
 
-    private static void saveConfig() {
-        LOGGER.info("Saving Tip4Serv configuration...");
-        SPEC.save();
+            return data.messageSuccess;
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return "§a[Tip4Serv] §7You have just received your purchase, thank you";
     }
 }

@@ -9,7 +9,11 @@ import net.minecraft.network.chat.TextComponent;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.server.ServerStartedEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -36,12 +40,6 @@ public class T4SMain {
     private static final Logger LOGGER = LoggerFactory.getLogger(T4SMain.class);
     private static final String HMAC_SHA1_ALGORITHM = "HmacSHA256";
 
-    private static String apiKey = "";
-    private static String serverId = "";
-    private static String publicKey = "";
-    private static String privateKey = "";
-    public static int interval = 1;
-
     public static String lastResponse = "";
     private static final String API_URL = "https://api.tip4serv.com/payments_api_v2.php";
     private static final String RESPONSE_FILE_PATH = "tip4serv/response.json";
@@ -51,12 +49,17 @@ public class T4SMain {
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::setup);
         MinecraftForge.EVENT_BUS.register(this);
 
-        Tip4ServConfig.register();
+        Tip4ServConfig.initConfig();
     }
 
     private void setup(final FMLCommonSetupEvent event) {
         LOGGER.info("Tip4Serv mod est en cours d'initialisation...");
-        loadConfig();
+    }
+
+    @OnlyIn(Dist.DEDICATED_SERVER)
+    @SubscribeEvent
+    public void onStart(ServerStartedEvent event){
+
         ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
         LOGGER.info("Planification de la vérification de l'API toutes les 10 secondes.");
         executor.scheduleAtFixedRate(() -> {
@@ -68,7 +71,7 @@ public class T4SMain {
             ExecutorService service = Executors.newSingleThreadExecutor();
             service.execute(() -> {
                 try {
-                    if (!apiKey.contains(".")) {
+                    if (!Tip4ServConfig.getApiKey().contains(".")) {
                         LOGGER.warn("La clé API ne contient pas '.', requête API ignorée.");
                         return;
                     }
@@ -175,7 +178,7 @@ public class T4SMain {
                             new_obj.addProperty("status", 3);
                             ServerPlayer player = getPlayer(player_str);
                             if (player != null) {
-                                player.sendMessage(new TextComponent(Tip4ServConfig.getMessageSuccess().get()), player.getUUID());
+                                player.sendMessage(new TextComponent(Tip4ServConfig.getMessageSuccess()), player.getUUID());
                                 LOGGER.info("Message de succès envoyé au joueur {}.", player_str);
                             } else {
                                 LOGGER.warn("Le joueur {} est introuvable lors de l'envoi du message de succès.", player_str);
@@ -198,7 +201,7 @@ public class T4SMain {
                 }
             });
             service.shutdown();
-        }, 0, interval, TimeUnit.MINUTES);
+        }, 0, Tip4ServConfig.getInterval(), TimeUnit.MINUTES);
     }
 
     /**
@@ -272,26 +275,6 @@ public class T4SMain {
         return null;
     }
 
-    private static void loadConfig() {
-        LOGGER.info("Chargement de la configuration du mod Tip4Serv.");
-        apiKey = Tip4ServConfig.getApiKey();
-        interval = Tip4ServConfig.getInterval();
-        if (!apiKey.isEmpty() && apiKey.contains(".")) {
-            String[] parts = apiKey.split("\\.");
-            if (parts.length == 3) {
-                serverId = parts[0];
-                privateKey = parts[1];
-                publicKey = parts[2];
-                LOGGER.info("Configuration chargée avec succès. Server ID: {}", serverId);
-                checkConnection(null);
-            } else {
-                LOGGER.error("La clé API n'est pas au format attendu (3 parties séparées par un point). Clé fournie: {}", apiKey);
-            }
-        } else {
-            LOGGER.error("La clé API n'est pas définie ou est dans un format incorrect.");
-        }
-    }
-
     public static String calculateHMAC(String server_id, String public_key, String private_key, Long timestamp) {
         try {
             SecretKeySpec signingKey = new SecretKeySpec(private_key.getBytes(), HMAC_SHA1_ALGORITHM);
@@ -310,14 +293,14 @@ public class T4SMain {
     }
 
     public static void sendResponse() {
-        if (apiKey.isEmpty() || serverId.isEmpty() || privateKey.isEmpty()) {
+        if (Tip4ServConfig.getApiKey().isEmpty() || Tip4ServConfig.getServerID().isEmpty() || Tip4ServConfig.getPrivateKey().isEmpty()) {
             LOGGER.warn("La clé API, le Server ID ou la clé privée ne sont pas définis !");
             return;
         }
         try {
             long timestamp = new Date().getTime();
             URL url = new URL(API_URL);
-            String macSignature = calculateHMAC(serverId, publicKey, privateKey, timestamp);
+            String macSignature = calculateHMAC(Tip4ServConfig.getServerID(), Tip4ServConfig.getPublicKey(), Tip4ServConfig.getPrivateKey(), timestamp);
             String fileContent = readResponseFile();
             String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
 
@@ -347,7 +330,7 @@ public class T4SMain {
     }
 
     public static String sendHttpRequest(String cmd) {
-        if (apiKey.isEmpty() || serverId.isEmpty() || privateKey.isEmpty()) {
+        if (Tip4ServConfig.getApiKey().isEmpty() || Tip4ServConfig.getServerID().isEmpty() || Tip4ServConfig.getPrivateKey().isEmpty()) {
             LOGGER.warn("La clé API, le Server ID ou la clé privée ne sont pas définis !");
             return "false";
         }
@@ -355,8 +338,8 @@ public class T4SMain {
             long timestamp = new Date().getTime();
             String fileContent = readResponseFile();
             String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
-            String macSignature = calculateHMAC(serverId, publicKey, privateKey, timestamp);
-            String urlString = API_URL + "?id=" + serverId + "&time=" + timestamp + "&json=" + jsonEncoded + "&get_cmd=" + cmd;
+            String macSignature = calculateHMAC(Tip4ServConfig.getServerID(), Tip4ServConfig.getPublicKey(), Tip4ServConfig.getPrivateKey(), timestamp);
+            String urlString = API_URL + "?id=" + Tip4ServConfig.getServerID() + "&time=" + timestamp + "&json=" + jsonEncoded + "&get_cmd=" + cmd;
             LOGGER.debug("Envoi d'une requête HTTP GET à l'URL : {}", urlString);
             URL url = new URL(urlString);
             HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
