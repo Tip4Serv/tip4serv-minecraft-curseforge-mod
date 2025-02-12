@@ -51,7 +51,7 @@ public class CommandEvents {
                         )
                         .then(Commands.literal("reload")
                                 .executes(context -> {
-                                    T4SMain.getINSTANCE().launchRequest();
+                                    T4SMain.getINSTANCE().launchRequest(true);
                                     context.getSource().sendSuccess(new TextComponent("Reloaded"), false);
                                     return 1;
                                 })

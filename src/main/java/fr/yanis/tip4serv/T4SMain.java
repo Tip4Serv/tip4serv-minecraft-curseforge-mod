@@ -41,12 +41,19 @@ public class T4SMain {
     private static T4SMain INSTANCE = null;
     private static final String HMAC_SHA1_ALGORITHM = "HmacSHA256";
 
+    // ANSI color codes
+    private static final String ANSI_RESET  = "\u001B[0m";
+    private static final String ANSI_RED    = "\u001B[31m";
+    private static final String ANSI_GREEN  = "\u001B[32m";
+    private static final String ANSI_YELLOW = "\u001B[33m";
+    private static final String ANSI_BLUE   = "\u001B[34m";
+
     public static String lastResponse = "";
     private static final String API_URL = "https://api.tip4serv.com/payments_api_v2.php";
     private static final String RESPONSE_FILE_PATH = "tip4serv/response.json";
 
     public T4SMain() {
-        LOGGER.info("Initialisation de l'instance du mod Tip4Serv.");
+        LOGGER.info(ANSI_BLUE + "Initializing Tip4Serv mod instance." + ANSI_RESET);
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::setup);
         MinecraftForge.EVENT_BUS.register(this);
 
@@ -56,54 +63,52 @@ public class T4SMain {
     }
 
     private void setup(final FMLCommonSetupEvent event) {
-        LOGGER.info("Tip4Serv mod est en cours d'initialisation...");
+        LOGGER.info(ANSI_BLUE + "Tip4Serv mod init." + ANSI_RESET);
     }
 
     @OnlyIn(Dist.DEDICATED_SERVER)
     @SubscribeEvent
-    public void onStart(ServerStartedEvent event){
-
+    public void onStart(ServerStartedEvent event) {
+        launchRequest(true);
         ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
-        LOGGER.info("Planification de la vérification de l'API toutes les 10 secondes.");
-        executor.scheduleAtFixedRate(this::launchRequest, 0, Tip4ServConfig.getInterval(), TimeUnit.MINUTES);
+        executor.scheduleAtFixedRate(() -> launchRequest(false), Tip4ServConfig.getInterval(), Tip4ServConfig.getInterval(), TimeUnit.MINUTES);
     }
 
-    public void launchRequest(){
-        LOGGER.debug("Démarrage de la tâche planifiée d'appel à l'API.");
+    public void launchRequest(boolean log) {
         if (ServerLifecycleHooks.getCurrentServer() == null) {
-            LOGGER.warn("Le serveur n'est pas disponible pour vérifier les joueurs en ligne.");
             return;
         }
         ExecutorService service = Executors.newSingleThreadExecutor();
         service.execute(() -> {
             try {
                 if (!Tip4ServConfig.getApiKey().contains(".")) {
-                    LOGGER.warn("La clé API ne contient pas '.', requête API ignorée.");
+                    if (log)
+                        LOGGER.warn(ANSI_YELLOW + "API key format invalid, skipping API request." + ANSI_RESET);
                     return;
                 }
-                LOGGER.debug("Envoi d'une requête HTTP à l'API avec le paramètre 'yes'.");
                 String json_string = sendHttpRequest("yes");
-                LOGGER.debug("Réponse reçue de l'API : {}", json_string);
 
                 if (json_string.contains("[Tip4serv info] No pending payments found")) {
-                    LOGGER.info("Aucun paiement en attente.");
+                    if (log)
+                        LOGGER.info(ANSI_GREEN + "No pending payments found." + ANSI_RESET);
                     return;
                 } else if (json_string.contains("[Tip4serv error]")) {
-                    LOGGER.error("L'API a retourné une erreur : {}", json_string);
+                    if (log)
+                        LOGGER.warn(ANSI_YELLOW + "Error while checking payments: " + json_string + ANSI_RESET);
                     return;
                 } else if (json_string.contains("[Tip4serv info]")) {
-                    LOGGER.info("Réponse info de l'API reçue : {}", json_string);
+                    if (log)
+                        LOGGER.info(ANSI_GREEN + "API info response received: " + json_string + ANSI_RESET);
                     return;
                 }
 
                 JsonArray infosArr = JsonParser.parseString(json_string).getAsJsonArray();
-                LOGGER.debug("JSON parsé avec succès, nombre d'éléments : {}", infosArr.size());
                 JsonObject new_json = new JsonObject();
                 boolean update_now = false;
 
                 for (int i1 = 0; i1 < infosArr.size(); i1++) {
                     JsonObject infos_obj = infosArr.get(i1).getAsJsonObject();
-                    // Extraction sécurisée des valeurs
+                    // Safely extract values from the JSON object
                     String id = safeGetAsString(infos_obj, "id");
                     String action = safeGetAsString(infos_obj, "action");
                     String player_str = safeGetAsString(infos_obj, "player");
@@ -116,23 +121,17 @@ public class T4SMain {
                     new_obj.addProperty("action", action);
                     JsonObject new_cmds = new JsonObject();
 
-                    LOGGER.debug("Vérification du statut en ligne pour le joueur '{}' (UUID: {}).", player_str, uuidStr);
                     String player_connected = check_online_player(uuidStr, player_str);
                     if (player_connected != null) {
-                        LOGGER.debug("Le joueur {} est en ligne.", player_connected);
                         player_str = player_connected;
-                    } else {
-                        LOGGER.debug("Le joueur {} n'est pas en ligne.", player_str);
                     }
 
-                    LOGGER.info("Traitement du paiement pour le joueur : {}", player_str);
                     List<String> cmds_failed = new ArrayList<>();
                     boolean redo_cmd = false;
 
                     for (int i2 = 0; i2 < cmds.size(); i2++) {
                         JsonElement elem = cmds.get(i2);
                         if (!elem.isJsonObject()) {
-                            LOGGER.warn("L'élément cmds à l'index {} n'est pas un objet JSON, il est ignoré.", i2);
                             continue;
                         }
                         JsonObject cmds_obj = elem.getAsJsonObject();
@@ -140,37 +139,28 @@ public class T4SMain {
                         String cmdId = safeGetAsString(cmds_obj, "id");
                         String cmdStr = safeGetAsString(cmds_obj, "str").replace("{minecraft_username}", player_str);
 
-                        LOGGER.debug("Traitement de la commande id {} avec l'état {}.", cmdId, state);
-                        // Pour state "1", le joueur doit être en ligne
                         if (state.equals("1")) {
                             if (player_connected == null) {
-                                LOGGER.warn("Commande {} non exécutée car le joueur {} n'est pas en ligne (requiert présence).", cmdId, player_str);
-                                //new_cmds.addProperty(cmdId, 14);
                                 cmds_failed.add(cmdId);
                                 redo_cmd = true;
                             } else {
-                                LOGGER.info("Exécution de la commande '{}' pour le joueur {} (vérification de présence en ligne).", cmdStr, player_str);
                                 ServerLifecycleHooks.getCurrentServer().execute(() -> {
                                     CommandSourceStack source = ServerLifecycleHooks.getCurrentServer().createCommandSourceStack();
                                     ServerLifecycleHooks.getCurrentServer().getCommands().performCommand(source, cmdStr);
-                                    LOGGER.debug("Commande '{}' exécutée.", cmdStr);
                                 });
                                 new_cmds.addProperty(cmdId, 3);
                                 update_now = true;
                             }
                         }
-                        // Pour state "0", exécution sans vérification de présence
+                        // For state "0", execute without checking for online presence
                         else if (state.equals("0")) {
-                            LOGGER.info("Exécution de la commande '{}' pour le joueur {} (aucune vérification en ligne requise).", cmdStr, player_str);
                             ServerLifecycleHooks.getCurrentServer().execute(() -> {
                                 CommandSourceStack source = ServerLifecycleHooks.getCurrentServer().createCommandSourceStack();
                                 ServerLifecycleHooks.getCurrentServer().getCommands().performCommand(source, cmdStr);
-                                LOGGER.debug("Commande '{}' exécutée.", cmdStr);
                             });
                             new_cmds.addProperty(cmdId, 3);
                             update_now = true;
                         } else {
-                            LOGGER.warn("État inconnu '{}' pour la commande {}. Commande ignorée.", state, cmdId);
                             new_cmds.addProperty(cmdId, 14);
                             cmds_failed.add(cmdId);
                             redo_cmd = true;
@@ -185,9 +175,6 @@ public class T4SMain {
                         ServerPlayer player = getPlayer(player_str);
                         if (player != null) {
                             player.sendMessage(new TextComponent(Tip4ServConfig.getMessageSuccess()), player.getUUID());
-                            LOGGER.info("Message de succès envoyé au joueur {}.", player_str);
-                        } else {
-                            LOGGER.warn("Le joueur {} est introuvable lors de l'envoi du message de succès.", player_str);
                         }
                     }
                     new_json.add(id, new_obj);
@@ -196,28 +183,23 @@ public class T4SMain {
                 lastResponse = new_json.toString();
                 boolean finalUpdate_now = update_now;
                 writeResponseFileAsync(lastResponse).thenRun(() -> {
-                    LOGGER.debug("JSON de réponse écrit dans le fichier : {}", lastResponse);
                     if (finalUpdate_now) {
-                        LOGGER.debug("Un ou plusieurs paiements ont été traités, envoi de la réponse à l'API.");
                         sendResponse();
                     }
                 });
             } catch (Exception e) {
-                LOGGER.error("Erreur lors de la vérification des paiements", e);
+                if (log)
+                    LOGGER.error(ANSI_RED + "Error while checking payments: {}" + ANSI_RESET, e.getMessage());
             }
         });
         service.shutdown();
     }
 
-    /**
-     * Méthode utilitaire pour extraire en toute sécurité une valeur de type chaîne depuis un objet JSON.
-     */
     private static String safeGetAsString(JsonObject obj, String key) {
         JsonElement elem = obj.get(key);
         if (elem != null && elem.isJsonPrimitive()) {
             return elem.getAsString();
         } else {
-            LOGGER.warn("La clé '{}' n'est pas une primitive dans l'objet : {}", key, obj);
             return "";
         }
     }
@@ -226,12 +208,8 @@ public class T4SMain {
         uuid_str = uuid_str.replace("\"", "").trim();
         mc_username = mc_username.replace("\"", "").trim();
 
-        LOGGER.debug("Vérification de la présence en ligne du joueur avec UUID '{}' ou nom '{}'.", uuid_str, mc_username);
-
-        if (ServerLifecycleHooks.getCurrentServer() == null) {
-            LOGGER.warn("Le serveur n'est pas disponible pour vérifier les joueurs en ligne.");
+        if (ServerLifecycleHooks.getCurrentServer() == null)
             return null;
-        }
 
         CompletableFuture<String> future = new CompletableFuture<>();
 
@@ -243,31 +221,25 @@ public class T4SMain {
                 UUID playerUUID = player.getUUID();
                 if (finalUuid_str.equalsIgnoreCase("name") || finalUuid_str.isEmpty()) {
                     if (loopedPlayerUsername.equalsIgnoreCase(finalMc_username)) {
-                        LOGGER.debug("Le joueur {} est en ligne (vérifié par nom).", loopedPlayerUsername);
                         future.complete(loopedPlayerUsername);
                         return;
                     }
                 } else {
                     if (playerUUID.toString().replace("-", "").equalsIgnoreCase(finalUuid_str)) {
-                        LOGGER.debug("Le joueur {} est en ligne (vérifié par UUID).", loopedPlayerUsername);
                         future.complete(loopedPlayerUsername);
                         return;
                     }
                 }
             }
-            LOGGER.debug("Le joueur {} n'a pas été trouvé en ligne.", finalMc_username);
             future.complete(null);
         });
 
         try {
             return future.get();
         } catch (Exception e) {
-            LOGGER.error("Erreur lors de la vérification de la présence en ligne du joueur", e);
             return null;
         }
     }
-
-
 
     public static ServerPlayer getPlayer(String mc_username) {
         for (ServerPlayer player : ServerLifecycleHooks.getCurrentServer().getPlayerList().getPlayers()) {
@@ -276,7 +248,6 @@ public class T4SMain {
                 return player;
             }
         }
-        LOGGER.debug("getPlayer : Le joueur {} est introuvable.", mc_username);
         return null;
     }
 
@@ -286,20 +257,17 @@ public class T4SMain {
             Mac mac = Mac.getInstance(HMAC_SHA1_ALGORITHM);
             mac.init(signingKey);
             String datas = server_id + public_key + timestamp;
-            LOGGER.debug("Calcul du HMAC pour la chaîne : {}", datas);
             byte[] rawHmac = mac.doFinal(datas.getBytes());
             String result = Base64.getEncoder().encodeToString(rawHmac);
-            LOGGER.debug("HMAC calculé avec succès.");
             return result;
         } catch (GeneralSecurityException e) {
-            LOGGER.warn("Tip4Serv error: Erreur inattendue lors de la création du hash.", e);
             throw new IllegalArgumentException(e);
         }
     }
 
     public static void sendResponse() {
         if (Tip4ServConfig.getApiKey().isEmpty() || Tip4ServConfig.getServerID().isEmpty() || Tip4ServConfig.getPrivateKey().isEmpty()) {
-            LOGGER.warn("La clé API, le Server ID ou la clé privée ne sont pas définis !");
+            LOGGER.warn(ANSI_YELLOW + "API Key, Server ID or Private Key not set!" + ANSI_RESET);
             return;
         }
         try {
@@ -309,7 +277,6 @@ public class T4SMain {
             String fileContent = readResponseFile();
             String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
 
-            LOGGER.debug("Envoi de la réponse à l'API. URL: {} | Timestamp: {} | JSON: {}", API_URL, timestamp, fileContent);
             HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
             connection.setRequestMethod("POST");
             connection.addRequestProperty("Authorization", macSignature);
@@ -318,7 +285,6 @@ public class T4SMain {
             try (var outputStream = connection.getOutputStream()) {
                 outputStream.write(jsonEncoded.getBytes());
                 outputStream.flush();
-                LOGGER.debug("JSON de réponse envoyé avec succès.");
             }
             StringBuilder response = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
@@ -328,15 +294,14 @@ public class T4SMain {
                 }
             }
             sendHttpRequest("update");
-            LOGGER.debug("Réponse reçue de l'API après envoi de la réponse : {}", response.toString());
         } catch (Exception e) {
-            LOGGER.error("Erreur de connexion à l'API Tip4Serv", e);
+            // Swallowing exception silently (could add a log here if needed)
         }
     }
 
     public static String sendHttpRequest(String cmd) {
         if (Tip4ServConfig.getApiKey().isEmpty() || Tip4ServConfig.getServerID().isEmpty() || Tip4ServConfig.getPrivateKey().isEmpty()) {
-            LOGGER.warn("La clé API, le Server ID ou la clé privée ne sont pas définis !");
+            LOGGER.warn(ANSI_YELLOW + "API Key, Server ID or Private Key not set!" + ANSI_RESET);
             return "false";
         }
         try {
@@ -345,7 +310,7 @@ public class T4SMain {
             String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
             String macSignature = calculateHMAC(Tip4ServConfig.getServerID(), Tip4ServConfig.getPublicKey(), Tip4ServConfig.getPrivateKey(), timestamp);
             String urlString = API_URL + "?id=" + Tip4ServConfig.getServerID() + "&time=" + timestamp + "&json=" + jsonEncoded + "&get_cmd=" + cmd;
-            LOGGER.debug("Envoi d'une requête HTTP GET à l'URL : {}", urlString);
+            LOGGER.debug(ANSI_BLUE + "Sending HTTP GET request to URL: " + urlString + ANSI_RESET);
             URL url = new URL(urlString);
             HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
             connection.addRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:25.0) Gecko/20100101 Firefox/25.0");
@@ -359,37 +324,35 @@ public class T4SMain {
                     response.append(line);
                 }
             }
-            LOGGER.debug("Requête HTTP GET complétée. Réponse : {}", response.toString());
             if (cmd.equals("update")) {
                 clearResponseFile();
             }
             return response.toString();
         } catch (Exception e) {
-            LOGGER.error("Erreur de connexion à l'API Tip4Serv", e);
+            LOGGER.warn(ANSI_YELLOW + "Error while sending HTTP request: " + e.getMessage() + ANSI_RESET);
             return "false";
         }
     }
 
     public static void checkConnection(Entity entity) {
-        LOGGER.debug("Vérification de la connexion à l'API Tip4Serv.");
         String response = sendHttpRequest("no");
         if (entity == null) {
             if (response.contains("[Tip4serv error]")) {
-                LOGGER.error("Erreur lors de la connexion à l'API Tip4Serv : {}", response);
+                LOGGER.error(ANSI_RED + "Error while connecting to Tip4Serv API: " + response + ANSI_RESET);
             } else {
-                LOGGER.info("Connexion réussie à l'API Tip4Serv : {}", response);
+                LOGGER.info(ANSI_GREEN + "Connection successful to Tip4Serv API: " + response + ANSI_RESET);
             }
         } else {
             if (response.contains("[Tip4serv error]")) {
-                entity.sendMessage(new TextComponent("Erreur lors de la connexion à l'API Tip4Serv : " + response), entity.getUUID());
+                entity.sendMessage(new TextComponent("Error while connecting to Tip4Serv API: " + response), entity.getUUID());
             } else {
-                entity.sendMessage(new TextComponent("Connexion réussie à l'API Tip4Serv : " + response), entity.getUUID());
+                entity.sendMessage(new TextComponent("Connection successful to Tip4Serv API: " + response), entity.getUUID());
             }
         }
     }
 
     // ================================
-    // Système de gestion du fichier response.json
+    // Response.json file management system
     // ================================
 
     private static CompletableFuture<Void> writeResponseFileAsync(String json) {
@@ -403,7 +366,6 @@ public class T4SMain {
         return future;
     }
 
-
     private static void clearResponseFile() {
         writeResponseFileAsync("");
     }
@@ -416,7 +378,6 @@ public class T4SMain {
             }
             return Files.readString(Paths.get(RESPONSE_FILE_PATH));
         } catch (Exception e) {
-            LOGGER.error("Erreur lors de la lecture du fichier response.json", e);
             return "";
         }
     }
