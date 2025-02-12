@@ -38,6 +38,7 @@ import java.util.concurrent.*;
 @Mod("tip4serv")
 public class T4SMain {
     private static final Logger LOGGER = LoggerFactory.getLogger(T4SMain.class);
+    private static T4SMain INSTANCE = null;
     private static final String HMAC_SHA1_ALGORITHM = "HmacSHA256";
 
     public static String lastResponse = "";
@@ -50,6 +51,8 @@ public class T4SMain {
         MinecraftForge.EVENT_BUS.register(this);
 
         Tip4ServConfig.initConfig();
+
+        INSTANCE = this;
     }
 
     private void setup(final FMLCommonSetupEvent event) {
@@ -62,100 +65,91 @@ public class T4SMain {
 
         ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
         LOGGER.info("Planification de la vérification de l'API toutes les 10 secondes.");
-        executor.scheduleAtFixedRate(() -> {
-            LOGGER.debug("Démarrage de la tâche planifiée d'appel à l'API.");
-            if (ServerLifecycleHooks.getCurrentServer() == null) {
-                LOGGER.warn("Le serveur n'est pas disponible pour vérifier les joueurs en ligne.");
-                return;
-            }
-            ExecutorService service = Executors.newSingleThreadExecutor();
-            service.execute(() -> {
-                try {
-                    if (!Tip4ServConfig.getApiKey().contains(".")) {
-                        LOGGER.warn("La clé API ne contient pas '.', requête API ignorée.");
-                        return;
+        executor.scheduleAtFixedRate(this::launchRequest, 0, Tip4ServConfig.getInterval(), TimeUnit.MINUTES);
+    }
+
+    public void launchRequest(){
+        LOGGER.debug("Démarrage de la tâche planifiée d'appel à l'API.");
+        if (ServerLifecycleHooks.getCurrentServer() == null) {
+            LOGGER.warn("Le serveur n'est pas disponible pour vérifier les joueurs en ligne.");
+            return;
+        }
+        ExecutorService service = Executors.newSingleThreadExecutor();
+        service.execute(() -> {
+            try {
+                if (!Tip4ServConfig.getApiKey().contains(".")) {
+                    LOGGER.warn("La clé API ne contient pas '.', requête API ignorée.");
+                    return;
+                }
+                LOGGER.debug("Envoi d'une requête HTTP à l'API avec le paramètre 'yes'.");
+                String json_string = sendHttpRequest("yes");
+                LOGGER.debug("Réponse reçue de l'API : {}", json_string);
+
+                if (json_string.contains("[Tip4serv info] No pending payments found")) {
+                    LOGGER.info("Aucun paiement en attente.");
+                    return;
+                } else if (json_string.contains("[Tip4serv error]")) {
+                    LOGGER.error("L'API a retourné une erreur : {}", json_string);
+                    return;
+                } else if (json_string.contains("[Tip4serv info]")) {
+                    LOGGER.info("Réponse info de l'API reçue : {}", json_string);
+                    return;
+                }
+
+                JsonArray infosArr = JsonParser.parseString(json_string).getAsJsonArray();
+                LOGGER.debug("JSON parsé avec succès, nombre d'éléments : {}", infosArr.size());
+                JsonObject new_json = new JsonObject();
+                boolean update_now = false;
+
+                for (int i1 = 0; i1 < infosArr.size(); i1++) {
+                    JsonObject infos_obj = infosArr.get(i1).getAsJsonObject();
+                    // Extraction sécurisée des valeurs
+                    String id = safeGetAsString(infos_obj, "id");
+                    String action = safeGetAsString(infos_obj, "action");
+                    String player_str = safeGetAsString(infos_obj, "player");
+                    String uuidStr = safeGetAsString(infos_obj, "uuid");
+                    JsonArray cmds = infos_obj.get("cmds").getAsJsonArray();
+                    String date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+
+                    JsonObject new_obj = new JsonObject();
+                    new_obj.addProperty("date", date);
+                    new_obj.addProperty("action", action);
+                    JsonObject new_cmds = new JsonObject();
+
+                    LOGGER.debug("Vérification du statut en ligne pour le joueur '{}' (UUID: {}).", player_str, uuidStr);
+                    String player_connected = check_online_player(uuidStr, player_str);
+                    if (player_connected != null) {
+                        LOGGER.debug("Le joueur {} est en ligne.", player_connected);
+                        player_str = player_connected;
+                    } else {
+                        LOGGER.debug("Le joueur {} n'est pas en ligne.", player_str);
                     }
-                    LOGGER.debug("Envoi d'une requête HTTP à l'API avec le paramètre 'yes'.");
-                    String json_string = sendHttpRequest("yes");
-                    LOGGER.debug("Réponse reçue de l'API : {}", json_string);
 
-                    if (json_string.contains("[Tip4serv info] No pending payments found")) {
-                        LOGGER.info("Aucun paiement en attente.");
-                        return;
-                    } else if (json_string.contains("[Tip4serv error]")) {
-                        LOGGER.error("L'API a retourné une erreur : {}", json_string);
-                        return;
-                    } else if (json_string.contains("[Tip4serv info]")) {
-                        LOGGER.info("Réponse info de l'API reçue : {}", json_string);
-                        return;
-                    }
+                    LOGGER.info("Traitement du paiement pour le joueur : {}", player_str);
+                    List<String> cmds_failed = new ArrayList<>();
+                    boolean redo_cmd = false;
 
-                    JsonArray infosArr = JsonParser.parseString(json_string).getAsJsonArray();
-                    LOGGER.debug("JSON parsé avec succès, nombre d'éléments : {}", infosArr.size());
-                    JsonObject new_json = new JsonObject();
-                    boolean update_now = false;
-
-                    for (int i1 = 0; i1 < infosArr.size(); i1++) {
-                        JsonObject infos_obj = infosArr.get(i1).getAsJsonObject();
-                        // Extraction sécurisée des valeurs
-                        String id = safeGetAsString(infos_obj, "id");
-                        String action = safeGetAsString(infos_obj, "action");
-                        String player_str = safeGetAsString(infos_obj, "player");
-                        String uuidStr = safeGetAsString(infos_obj, "uuid");
-                        JsonArray cmds = infos_obj.get("cmds").getAsJsonArray();
-                        String date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
-
-                        JsonObject new_obj = new JsonObject();
-                        new_obj.addProperty("date", date);
-                        new_obj.addProperty("action", action);
-                        JsonObject new_cmds = new JsonObject();
-
-                        LOGGER.debug("Vérification du statut en ligne pour le joueur '{}' (UUID: {}).", player_str, uuidStr);
-                        String player_connected = check_online_player(uuidStr, player_str);
-                        if (player_connected != null) {
-                            LOGGER.debug("Le joueur {} est en ligne.", player_connected);
-                            player_str = player_connected;
-                        } else {
-                            LOGGER.debug("Le joueur {} n'est pas en ligne.", player_str);
+                    for (int i2 = 0; i2 < cmds.size(); i2++) {
+                        JsonElement elem = cmds.get(i2);
+                        if (!elem.isJsonObject()) {
+                            LOGGER.warn("L'élément cmds à l'index {} n'est pas un objet JSON, il est ignoré.", i2);
+                            continue;
                         }
+                        JsonObject cmds_obj = elem.getAsJsonObject();
+                        String state = safeGetAsString(cmds_obj, "state");
+                        String cmdId = safeGetAsString(cmds_obj, "id");
+                        String cmdStr = safeGetAsString(cmds_obj, "str").replace("{minecraft_username}", player_str);
 
-                        LOGGER.info("Traitement du paiement pour le joueur : {}", player_str);
-                        List<String> cmds_failed = new ArrayList<>();
-                        boolean redo_cmd = false;
-
-                        for (int i2 = 0; i2 < cmds.size(); i2++) {
-                            JsonElement elem = cmds.get(i2);
-                            if (!elem.isJsonObject()) {
-                                LOGGER.warn("L'élément cmds à l'index {} n'est pas un objet JSON, il est ignoré.", i2);
-                                continue;
-                            }
-                            JsonObject cmds_obj = elem.getAsJsonObject();
-                            String state = safeGetAsString(cmds_obj, "state");
-                            String cmdId = safeGetAsString(cmds_obj, "id");
-                            String cmdStr = safeGetAsString(cmds_obj, "str").replace("{minecraft_username}", player_str);
-
-                            LOGGER.debug("Traitement de la commande id {} avec l'état {}.", cmdId, state);
-                            // Pour state "1", le joueur doit être en ligne
-                            if (state.equals("1")) {
-                                if (player_connected == null) {
-                                    LOGGER.warn("Commande {} non exécutée car le joueur {} n'est pas en ligne (requiert présence).", cmdId, player_str);
-                                    //new_cmds.addProperty(cmdId, 14);
-                                    cmds_failed.add(cmdId);
-                                    redo_cmd = true;
-                                } else {
-                                    LOGGER.info("Exécution de la commande '{}' pour le joueur {} (vérification de présence en ligne).", cmdStr, player_str);
-                                    ServerLifecycleHooks.getCurrentServer().execute(() -> {
-                                        CommandSourceStack source = ServerLifecycleHooks.getCurrentServer().createCommandSourceStack();
-                                        ServerLifecycleHooks.getCurrentServer().getCommands().performCommand(source, cmdStr);
-                                        LOGGER.debug("Commande '{}' exécutée.", cmdStr);
-                                    });
-                                    new_cmds.addProperty(cmdId, 3);
-                                    update_now = true;
-                                }
-                            }
-                            // Pour state "0", exécution sans vérification de présence
-                            else if (state.equals("0")) {
-                                LOGGER.info("Exécution de la commande '{}' pour le joueur {} (aucune vérification en ligne requise).", cmdStr, player_str);
+                        LOGGER.debug("Traitement de la commande id {} avec l'état {}.", cmdId, state);
+                        // Pour state "1", le joueur doit être en ligne
+                        if (state.equals("1")) {
+                            if (player_connected == null) {
+                                LOGGER.warn("Commande {} non exécutée car le joueur {} n'est pas en ligne (requiert présence).", cmdId, player_str);
+                                //new_cmds.addProperty(cmdId, 14);
+                                cmds_failed.add(cmdId);
+                                redo_cmd = true;
+                            } else {
+                                LOGGER.info("Exécution de la commande '{}' pour le joueur {} (vérification de présence en ligne).", cmdStr, player_str);
                                 ServerLifecycleHooks.getCurrentServer().execute(() -> {
                                     CommandSourceStack source = ServerLifecycleHooks.getCurrentServer().createCommandSourceStack();
                                     ServerLifecycleHooks.getCurrentServer().getCommands().performCommand(source, cmdStr);
@@ -163,45 +157,56 @@ public class T4SMain {
                                 });
                                 new_cmds.addProperty(cmdId, 3);
                                 update_now = true;
-                            } else {
-                                LOGGER.warn("État inconnu '{}' pour la commande {}. Commande ignorée.", state, cmdId);
-                                new_cmds.addProperty(cmdId, 14);
-                                cmds_failed.add(cmdId);
-                                redo_cmd = true;
                             }
                         }
-                        new_obj.add("cmds", new_cmds);
-
-                        if (redo_cmd) {
-                            new_obj.addProperty("status", 14);
+                        // Pour state "0", exécution sans vérification de présence
+                        else if (state.equals("0")) {
+                            LOGGER.info("Exécution de la commande '{}' pour le joueur {} (aucune vérification en ligne requise).", cmdStr, player_str);
+                            ServerLifecycleHooks.getCurrentServer().execute(() -> {
+                                CommandSourceStack source = ServerLifecycleHooks.getCurrentServer().createCommandSourceStack();
+                                ServerLifecycleHooks.getCurrentServer().getCommands().performCommand(source, cmdStr);
+                                LOGGER.debug("Commande '{}' exécutée.", cmdStr);
+                            });
+                            new_cmds.addProperty(cmdId, 3);
+                            update_now = true;
                         } else {
-                            new_obj.addProperty("status", 3);
-                            ServerPlayer player = getPlayer(player_str);
-                            if (player != null) {
-                                player.sendMessage(new TextComponent(Tip4ServConfig.getMessageSuccess()), player.getUUID());
-                                LOGGER.info("Message de succès envoyé au joueur {}.", player_str);
-                            } else {
-                                LOGGER.warn("Le joueur {} est introuvable lors de l'envoi du message de succès.", player_str);
-                            }
+                            LOGGER.warn("État inconnu '{}' pour la commande {}. Commande ignorée.", state, cmdId);
+                            new_cmds.addProperty(cmdId, 14);
+                            cmds_failed.add(cmdId);
+                            redo_cmd = true;
                         }
-                        new_json.add(id, new_obj);
                     }
+                    new_obj.add("cmds", new_cmds);
 
-                    lastResponse = new_json.toString();
-                    boolean finalUpdate_now = update_now;
-                    writeResponseFileAsync(lastResponse).thenRun(() -> {
-                        LOGGER.debug("JSON de réponse écrit dans le fichier : {}", lastResponse);
-                        if (finalUpdate_now) {
-                            LOGGER.debug("Un ou plusieurs paiements ont été traités, envoi de la réponse à l'API.");
-                            sendResponse();
+                    if (redo_cmd) {
+                        new_obj.addProperty("status", 14);
+                    } else {
+                        new_obj.addProperty("status", 3);
+                        ServerPlayer player = getPlayer(player_str);
+                        if (player != null) {
+                            player.sendMessage(new TextComponent(Tip4ServConfig.getMessageSuccess()), player.getUUID());
+                            LOGGER.info("Message de succès envoyé au joueur {}.", player_str);
+                        } else {
+                            LOGGER.warn("Le joueur {} est introuvable lors de l'envoi du message de succès.", player_str);
                         }
-                    });
-                } catch (Exception e) {
-                    LOGGER.error("Erreur lors de la vérification des paiements", e);
+                    }
+                    new_json.add(id, new_obj);
                 }
-            });
-            service.shutdown();
-        }, 0, Tip4ServConfig.getInterval(), TimeUnit.MINUTES);
+
+                lastResponse = new_json.toString();
+                boolean finalUpdate_now = update_now;
+                writeResponseFileAsync(lastResponse).thenRun(() -> {
+                    LOGGER.debug("JSON de réponse écrit dans le fichier : {}", lastResponse);
+                    if (finalUpdate_now) {
+                        LOGGER.debug("Un ou plusieurs paiements ont été traités, envoi de la réponse à l'API.");
+                        sendResponse();
+                    }
+                });
+            } catch (Exception e) {
+                LOGGER.error("Erreur lors de la vérification des paiements", e);
+            }
+        });
+        service.shutdown();
     }
 
     /**
@@ -414,5 +419,9 @@ public class T4SMain {
             LOGGER.error("Erreur lors de la lecture du fichier response.json", e);
             return "";
         }
+    }
+
+    public static T4SMain getINSTANCE() {
+        return INSTANCE;
     }
 }
