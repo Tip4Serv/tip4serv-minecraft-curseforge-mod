@@ -41,19 +41,12 @@ public class T4SMain {
     private static T4SMain INSTANCE = null;
     private static final String HMAC_SHA1_ALGORITHM = "HmacSHA256";
 
-    // ANSI color codes
-    private static final String ANSI_RESET  = "\u001B[0m";
-    private static final String ANSI_RED    = "\u001B[31m";
-    private static final String ANSI_GREEN  = "\u001B[32m";
-    private static final String ANSI_YELLOW = "\u001B[33m";
-    private static final String ANSI_BLUE   = "\u001B[34m";
-
     public static String lastResponse = "";
     private static final String API_URL = "https://api.tip4serv.com/payments_api_v2.php";
     private static final String RESPONSE_FILE_PATH = "tip4serv/response.json";
 
     public T4SMain() {
-        LOGGER.info(ANSI_BLUE + "Initializing Tip4Serv mod instance." + ANSI_RESET);
+        LOGGER.info("Initializing Tip4Serv mod instance.");
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::setup);
         MinecraftForge.EVENT_BUS.register(this);
 
@@ -63,7 +56,7 @@ public class T4SMain {
     }
 
     private void setup(final FMLCommonSetupEvent event) {
-        LOGGER.info(ANSI_BLUE + "Tip4Serv mod init." + ANSI_RESET);
+        LOGGER.info("Tip4Serv mod init.");
     }
 
     @OnlyIn(Dist.DEDICATED_SERVER)
@@ -83,22 +76,22 @@ public class T4SMain {
             try {
                 if (!Tip4ServConfig.getApiKey().contains(".")) {
                     if (log)
-                        LOGGER.warn(ANSI_YELLOW + "API key format invalid, skipping API request." + ANSI_RESET);
+                        LOGGER.warn("Please provide a correct apiKey in tip4serv/config.json file");
                     return;
                 }
                 String json_string = sendHttpRequest("yes");
 
                 if (json_string.contains("[Tip4serv info] No pending payments found")) {
                     if (log)
-                        LOGGER.info(ANSI_GREEN + "No pending payments found." + ANSI_RESET);
+                        LOGGER.info("No pending payments found.");
                     return;
                 } else if (json_string.contains("[Tip4serv error]")) {
                     if (log)
-                        LOGGER.warn(ANSI_YELLOW + "Error while checking payments: " + json_string + ANSI_RESET);
+                        LOGGER.warn("Error while checking payments: " + json_string);
                     return;
                 } else if (json_string.contains("[Tip4serv info]")) {
                     if (log)
-                        LOGGER.info(ANSI_GREEN + "API info response received: " + json_string + ANSI_RESET);
+                        LOGGER.info("API info response received: " + json_string);
                     return;
                 }
 
@@ -189,7 +182,7 @@ public class T4SMain {
                 });
             } catch (Exception e) {
                 if (log)
-                    LOGGER.error(ANSI_RED + "Error while checking payments: {}" + ANSI_RESET, e.getMessage());
+                    LOGGER.error("Error while checking payments: {}", e.getMessage());
             }
         });
         service.shutdown();
@@ -267,7 +260,6 @@ public class T4SMain {
 
     public static void sendResponse() {
         if (Tip4ServConfig.getApiKey().isEmpty() || Tip4ServConfig.getServerID().isEmpty() || Tip4ServConfig.getPrivateKey().isEmpty()) {
-            LOGGER.warn(ANSI_YELLOW + "API Key, Server ID or Private Key not set!" + ANSI_RESET);
             return;
         }
         try {
@@ -294,14 +286,12 @@ public class T4SMain {
                 }
             }
             sendHttpRequest("update");
-        } catch (Exception e) {
-            // Swallowing exception silently (could add a log here if needed)
+        } catch (Exception ignored) {
         }
     }
 
     public static String sendHttpRequest(String cmd) {
         if (Tip4ServConfig.getApiKey().isEmpty() || Tip4ServConfig.getServerID().isEmpty() || Tip4ServConfig.getPrivateKey().isEmpty()) {
-            LOGGER.warn(ANSI_YELLOW + "API Key, Server ID or Private Key not set!" + ANSI_RESET);
             return "false";
         }
         try {
@@ -310,7 +300,6 @@ public class T4SMain {
             String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
             String macSignature = calculateHMAC(Tip4ServConfig.getServerID(), Tip4ServConfig.getPublicKey(), Tip4ServConfig.getPrivateKey(), timestamp);
             String urlString = API_URL + "?id=" + Tip4ServConfig.getServerID() + "&time=" + timestamp + "&json=" + jsonEncoded + "&get_cmd=" + cmd;
-            LOGGER.debug(ANSI_BLUE + "Sending HTTP GET request to URL: " + urlString + ANSI_RESET);
             URL url = new URL(urlString);
             HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
             connection.addRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:25.0) Gecko/20100101 Firefox/25.0");
@@ -329,24 +318,33 @@ public class T4SMain {
             }
             return response.toString();
         } catch (Exception e) {
-            LOGGER.warn(ANSI_YELLOW + "Error while sending HTTP request: " + e.getMessage() + ANSI_RESET);
             return "false";
         }
     }
 
     public static void checkConnection(Entity entity) {
+
+        if (Tip4ServConfig.getApiKey().isEmpty() || Tip4ServConfig.getServerID().isEmpty() || Tip4ServConfig.getPrivateKey().isEmpty()) {
+            if (entity == null) {
+                LOGGER.warn("Please provide a correct apiKey in tip4serv/config.json file");
+            } else {
+                entity.sendMessage(new TextComponent("Please provide a correct apiKey in tip4serv/config.json file"), entity.getUUID());
+            }
+            return;
+        }
+
         String response = sendHttpRequest("no");
         if (entity == null) {
             if (response.contains("[Tip4serv error]")) {
-                LOGGER.error(ANSI_RED + "Error while connecting to Tip4Serv API: " + response + ANSI_RESET);
+                LOGGER.error("Error while connecting to Tip4Serv API: " + response);
             } else {
-                LOGGER.info(ANSI_GREEN + "Connection successful to Tip4Serv API: " + response + ANSI_RESET);
+                LOGGER.info("Connection to Tip4Serv API: " + response);
             }
         } else {
             if (response.contains("[Tip4serv error]")) {
                 entity.sendMessage(new TextComponent("Error while connecting to Tip4Serv API: " + response), entity.getUUID());
             } else {
-                entity.sendMessage(new TextComponent("Connection successful to Tip4Serv API: " + response), entity.getUUID());
+                entity.sendMessage(new TextComponent("Connection to Tip4Serv AP: " + response), entity.getUUID());
             }
         }
     }

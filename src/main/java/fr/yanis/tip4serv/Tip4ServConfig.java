@@ -36,8 +36,7 @@ public class Tip4ServConfig {
                 Files.createFile(configPath);
             }
             loadConfig();
-        } catch (IOException e) {
-            LOGGER.error("Erreur lors de la création du dossier de configuration : {}", CONFIG_FILE, e);
+        } catch (IOException ignored) {
         }
     }
 
@@ -46,7 +45,6 @@ public class Tip4ServConfig {
         try {
             String content = Files.readString(path, StandardCharsets.UTF_8);
             if (content.trim().isEmpty()) {
-                LOGGER.warn("Le fichier de configuration est vide, on crée une configuration par défaut.");
                 saveConfig();
                 return;
             }
@@ -62,18 +60,15 @@ public class Tip4ServConfig {
                 if (apiKey != null && !apiKey.isEmpty()) {
                     String[] parts = apiKey.split("\\.");
                     if (parts.length == 3) {
-                        LOGGER.info("Configuration chargée avec succès. Server ID: {}", Tip4ServConfig.getServerID());
                         T4SMain.checkConnection(null);
                     } else {
-                        LOGGER.error("La clé API n'est pas au format attendu (3 parties séparées par un point). Clé fournie: {}", apiKey);
+                        LOGGER.warn("Please provide a correct apiKey in tip4serv/config.json file");
                     }
+                } else {
+                    LOGGER.warn("Please provide a correct apiKey in tip4serv/config.json file");
                 }
-            } else {
-                LOGGER.warn("Le contenu de la configuration est invalide.");
             }
-            LOGGER.info("Configuration chargée depuis : {}", path.toAbsolutePath());
-        } catch (IOException e) {
-            LOGGER.error("Erreur lors de la lecture du fichier de configuration", e);
+        } catch (IOException ignored) {
         }
     }
 
@@ -89,10 +84,8 @@ public class Tip4ServConfig {
         String json = gson.toJson(data);
         try {
             Files.writeString(Paths.get(CONFIG_FILE), json, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-            LOGGER.info("Configuration sauvegardée dans : {}", CONFIG_FILE);
             loadConfig();
-        } catch (IOException e) {
-            LOGGER.error("Erreur lors de l'écriture du fichier de configuration", e);
+        } catch (IOException ignored) {
         }
     }
 
@@ -103,6 +96,7 @@ public class Tip4ServConfig {
 
             return data.apiKey.trim();
         } catch (IOException e) {
+            LOGGER.warn("Please provide a correct apiKey in tip4serv/config.json file");
             e.printStackTrace();
         }
         return "";
