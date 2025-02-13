@@ -324,7 +324,7 @@ public class T4SMain {
 
     public static void checkConnection(Entity entity) {
 
-        if (Tip4ServConfig.getApiKey().isEmpty() || Tip4ServConfig.getServerID().isEmpty() || Tip4ServConfig.getPrivateKey().isEmpty()) {
+        if (Tip4ServConfig.getApiKey().isEmpty() || Tip4ServConfig.getServerID().isEmpty() || Tip4ServConfig.getPrivateKey().isEmpty() || Tip4ServConfig.getPublicKey().isEmpty()) {
             if (entity == null) {
                 LOGGER.warn("Please provide a correct apiKey in tip4serv/config.json file");
             } else {
