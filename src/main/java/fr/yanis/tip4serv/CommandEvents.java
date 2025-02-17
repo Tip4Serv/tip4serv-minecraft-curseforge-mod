@@ -10,7 +10,7 @@ import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-@Mod.EventBusSubscriber(modid = "tip4serv", bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.DEDICATED_SERVER)
+@Mod.EventBusSubscriber(modid = "t4s", bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.DEDICATED_SERVER)
 public class CommandEvents {
 
     @SubscribeEvent
@@ -45,13 +45,15 @@ public class CommandEvents {
                                 .executes(context -> {
                                     T4SMain.checkConnection(context.getSource().getEntity());
                                     return 1;
-                                }))
+                                })
+                        )
                         .then(Commands.literal("reload")
                                 .executes(context -> {
                                     T4SMain.getINSTANCE().launchRequest(true);
                                     context.getSource().sendSuccess(Component.literal("Reloaded"), false);
                                     return 1;
-                                }))
+                                })
+                        )
         );
     }
 }
