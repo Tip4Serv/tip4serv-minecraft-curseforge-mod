@@ -36,7 +36,7 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
 
-@Mod("tip4serv")
+@Mod("t4s")
 public class T4SMain {
     private static final Logger LOGGER = LoggerFactory.getLogger(T4SMain.class);
     private static T4SMain INSTANCE = null;
