@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
+import java.util.concurrent.CompletableFuture;
 
 public class Tip4ServKey {
 
@@ -25,7 +26,8 @@ public class Tip4ServKey {
         }
     }
 
-    public static void loadKey(){
+    public static CompletableFuture<Void> loadKey(){
+        CompletableFuture<Void> future = new CompletableFuture<>();
         File file = new File("tip4serv/tip4serv.key");
         if (file.exists()) {
             try {
@@ -36,19 +38,21 @@ public class Tip4ServKey {
                 if (key != null && !key.isEmpty()) {
                     String[] parts = key.split("\\.");
                     if (parts.length == 3) {
-                        T4SMain.checkConnection(null);
+                        future.complete(null);
                     } else {
-                        LOGGER.info("Please provide a valid API key in tip4serv/tip4serv.key");
+                        future.completeExceptionally(new Exception("Please provide a valid API key in tip4serv/tip4serv.key"));
                     }
                 } else {
-                    LOGGER.info("Please provide a valid API key in tip4serv/tip4serv.key");
+                    future.completeExceptionally(new Exception("Please provide a valid API key in tip4serv/tip4serv.key"));
                 }
             } catch (Exception e) {
                 e.printStackTrace();
             }
         } else {
             init();
+            future.completeExceptionally(new Exception("Please provide a valid API key in tip4serv/tip4serv.key"));
         }
+        return future;
     }
 
     public static String getApiKey() {
