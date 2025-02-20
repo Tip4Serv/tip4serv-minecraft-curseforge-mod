@@ -78,7 +78,7 @@ public class T4SMain {
             try {
                 if (!Tip4ServKey.getApiKey().contains(".")) {
                     if (log)
-                        LOGGER.warn("Please provide a correct apiKey in tip4serv/config.json file");
+                        LOGGER.warn("Please provide a correct apiKey in tip4serv/tip4serv.key file");
                     return;
                 }
                 String json_string = sendHttpRequest("yes");
@@ -328,9 +328,9 @@ public class T4SMain {
 
         if (Tip4ServKey.getApiKey().isEmpty() || Tip4ServKey.getServerID().isEmpty() || Tip4ServKey.getPrivateKey().isEmpty() || Tip4ServKey.getPublicKey().isEmpty()) {
             if (entity == null) {
-                LOGGER.warn("Please provide a correct apiKey in tip4serv/config.json file");
+                LOGGER.warn("Please provide a correct apiKey in tip4serv/tip4serv.key file");
             } else {
-                entity.sendMessage(new TextComponent("Please provide a correct apiKey in tip4serv/config.json file"), entity.getUUID());
+                entity.sendMessage(new TextComponent("Please provide a correct apiKey in tip4serv/tip4serv.key file"), entity.getUUID());
             }
             return;
         }
