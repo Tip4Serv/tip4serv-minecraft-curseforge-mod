@@ -48,7 +48,7 @@ public class CommandEvents {
                                     Tip4ServKey.loadKey()
                                             .thenRun(() -> T4SMain.checkConnection(context.getSource().getEntity()))
                                             .exceptionally(e -> {
-                                                context.getSource().sendSuccess(new TextComponent(e.getMessage()), false);
+                                                context.getSource().sendSuccess(new TextComponent(e.getMessage().replace("java.lang.Exception: ", "")), false);
                                                 return null;
                                             });
                                     return 1;
@@ -57,7 +57,7 @@ public class CommandEvents {
                         .then(Commands.literal("reload")
                                 .executes(context -> {
                                     Tip4ServKey.loadKey().thenRun(() -> T4SMain.getINSTANCE().launchRequest(true)).exceptionally(e -> {
-                                        context.getSource().sendSuccess(new TextComponent(e.getMessage()), false);
+                                        context.getSource().sendSuccess(new TextComponent(e.getMessage().replace("java.lang.Exception: ", "")), false);
                                         return null;
                                     });
                                     context.getSource().sendSuccess(new TextComponent("Reloaded"), false);
