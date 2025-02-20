@@ -61,6 +61,7 @@ public class T4SMain {
         MinecraftForge.EVENT_BUS.register(this);
 
         Tip4ServConfig.initConfig();
+        Tip4ServKey.init();
 
         INSTANCE = this;
     }
@@ -86,9 +87,9 @@ public class T4SMain {
         ExecutorService service = Executors.newSingleThreadExecutor();
         service.execute(() -> {
             try {
-                if (!Tip4ServConfig.getApiKey().contains(".")) {
+                if (!Tip4ServKey.getApiKey().contains(".")) {
                     if (log)
-                        LOGGER.warn("Please provide a correct apiKey in tip4serv/config.json file");
+                        LOGGER.warn("Please provide a correct apiKey in tip4serv/tip4serv.key file");
                     return;
                 }
                 String json_string = sendHttpRequest("yes");
@@ -278,13 +279,13 @@ public class T4SMain {
     }
 
     public static void sendResponse() {
-        if (Tip4ServConfig.getApiKey().isEmpty() || Tip4ServConfig.getServerID().isEmpty() || Tip4ServConfig.getPrivateKey().isEmpty()) {
+        if (Tip4ServKey.getApiKey().isEmpty() || Tip4ServKey.getServerID().isEmpty() || Tip4ServKey.getPrivateKey().isEmpty()) {
             return;
         }
         try {
             long timestamp = new Date().getTime();
             URL url = new URL(API_URL);
-            String macSignature = calculateHMAC(Tip4ServConfig.getServerID(), Tip4ServConfig.getPublicKey(), Tip4ServConfig.getPrivateKey(), timestamp);
+            String macSignature = calculateHMAC(Tip4ServKey.getServerID(), Tip4ServKey.getPublicKey(), Tip4ServKey.getPrivateKey(), timestamp);
             String fileContent = readResponseFile();
             String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
 
@@ -310,15 +311,15 @@ public class T4SMain {
     }
 
     public static String sendHttpRequest(String cmd) {
-        if (Tip4ServConfig.getApiKey().isEmpty() || Tip4ServConfig.getServerID().isEmpty() || Tip4ServConfig.getPrivateKey().isEmpty()) {
+        if (Tip4ServKey.getApiKey().isEmpty() || Tip4ServKey.getServerID().isEmpty() || Tip4ServKey.getPrivateKey().isEmpty()) {
             return "false";
         }
         try {
             long timestamp = new Date().getTime();
             String fileContent = readResponseFile();
             String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
-            String macSignature = calculateHMAC(Tip4ServConfig.getServerID(), Tip4ServConfig.getPublicKey(), Tip4ServConfig.getPrivateKey(), timestamp);
-            String urlString = API_URL + "?id=" + Tip4ServConfig.getServerID() + "&time=" + timestamp + "&json=" + jsonEncoded + "&get_cmd=" + cmd;
+            String macSignature = calculateHMAC(Tip4ServKey.getServerID(), Tip4ServKey.getPublicKey(), Tip4ServKey.getPrivateKey(), timestamp);
+            String urlString = API_URL + "?id=" + Tip4ServKey.getServerID() + "&time=" + timestamp + "&json=" + jsonEncoded + "&get_cmd=" + cmd;
             URL url = new URL(urlString);
             HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
             connection.addRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:25.0) Gecko/20100101 Firefox/25.0");
@@ -343,18 +344,18 @@ public class T4SMain {
 
     public static void checkConnection(Entity entity) {
 
-        if (Tip4ServConfig.getApiKey().isEmpty()
-                || Tip4ServConfig.getServerID().isEmpty()
-                || Tip4ServConfig.getPrivateKey().isEmpty()
-                || Tip4ServConfig.getPublicKey().isEmpty()) {
+        if (Tip4ServKey.getApiKey().isEmpty()
+                || Tip4ServKey.getServerID().isEmpty()
+                || Tip4ServKey.getPrivateKey().isEmpty()
+                || Tip4ServKey.getPublicKey().isEmpty()) {
             if (entity == null) {
-                LOGGER.warn("Please provide a correct apiKey in tip4serv/config.json file");
+                LOGGER.warn("Please provide a correct apiKey in tip4serv/tip4serv.key file");
             }
             else if (entity instanceof ServerPlayer player) {
-                player.sendSystemMessage(Component.literal("Please provide a correct apiKey in tip4serv/config.json file"));
+                player.sendSystemMessage(Component.literal("Please provide a correct apiKey in tip4serv/tip4serv.key file"));
             }
             else {
-                LOGGER.warn("Please provide a correct apiKey in tip4serv/config.json file");
+                LOGGER.warn("Please provide a correct apiKey in tip4serv/tip4serv.key file");
             }
             return;
         }
