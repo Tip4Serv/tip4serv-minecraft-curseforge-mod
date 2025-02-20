@@ -64,8 +64,10 @@ public class T4SMain {
     @OnlyIn(Dist.DEDICATED_SERVER)
     @SubscribeEvent
     public void onStart(ServerStartedEvent event) {
-        Tip4ServKey.loadKey();
-        launchRequest(true);
+        Tip4ServKey.loadKey().thenRun(() -> launchRequest(true)).exceptionally(e -> {
+            LOGGER.error(e.getMessage());
+            return null;
+        });
         ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
         executor.scheduleAtFixedRate(() -> launchRequest(false), Tip4ServConfig.getInterval(), Tip4ServConfig.getInterval(), TimeUnit.MINUTES);
     }

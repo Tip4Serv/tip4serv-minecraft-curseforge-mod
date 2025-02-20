@@ -10,6 +10,8 @@ import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import javax.naming.Context;
+
 @Mod.EventBusSubscriber(modid = "t4s", bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.DEDICATED_SERVER)
 public class CommandEvents {
 
@@ -43,15 +45,21 @@ public class CommandEvents {
                         .requires(source -> source.hasPermission(3))
                         .then(Commands.literal("connect")
                                 .executes(context -> {
-                                    Tip4ServKey.loadKey();
-                                    T4SMain.checkConnection(context.getSource().getEntity());
+                                    Tip4ServKey.loadKey()
+                                            .thenRun(() -> T4SMain.checkConnection(context.getSource().getEntity()))
+                                            .exceptionally(e -> {
+                                                context.getSource().sendSuccess(Component.literal(e.getMessage().replace("java.lang.Exception: ", "")), false);
+                                                return null;
+                                            });
                                     return 1;
                                 })
                         )
                         .then(Commands.literal("reload")
                                 .executes(context -> {
-                                    Tip4ServKey.loadKey();
-                                    T4SMain.getINSTANCE().launchRequest(true);
+                                    Tip4ServKey.loadKey().thenRun(() -> T4SMain.getINSTANCE().launchRequest(true)).exceptionally(e -> {
+                                        context.getSource().sendSuccess(Component.literal(e.getMessage().replace("java.lang.Exception: ", "")), false);
+                                        return null;
+                                    });
                                     context.getSource().sendSuccess(Component.literal("Reloaded"), false);
                                     return 1;
                                 })
