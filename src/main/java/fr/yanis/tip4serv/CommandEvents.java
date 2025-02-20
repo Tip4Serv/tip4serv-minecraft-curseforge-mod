@@ -45,15 +45,21 @@ public class CommandEvents {
                         .requires(source -> source.hasPermission(3))
                         .then(Commands.literal("connect")
                                 .executes(context -> {
-                                    Tip4ServKey.loadKey();
-                                    T4SMain.checkConnection(context.getSource().getEntity());
+                                    Tip4ServKey.loadKey()
+                                            .thenRun(() -> T4SMain.checkConnection(context.getSource().getEntity()))
+                                            .exceptionally(e -> {
+                                                context.getSource().sendSuccess(new TextComponent(e.getMessage()), false);
+                                                return null;
+                                            });
                                     return 1;
                                 })
                         )
                         .then(Commands.literal("reload")
                                 .executes(context -> {
-                                    Tip4ServKey.loadKey();
-                                    T4SMain.getINSTANCE().launchRequest(true);
+                                    Tip4ServKey.loadKey().thenRun(() -> T4SMain.getINSTANCE().launchRequest(true)).exceptionally(e -> {
+                                        context.getSource().sendSuccess(new TextComponent(e.getMessage()), false);
+                                        return null;
+                                    });
                                     context.getSource().sendSuccess(new TextComponent("Reloaded"), false);
                                     return 1;
                                 })

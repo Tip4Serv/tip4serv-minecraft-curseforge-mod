@@ -329,6 +329,7 @@ public class T4SMain {
         if (Tip4ServKey.getApiKey().isEmpty() || Tip4ServKey.getServerID().isEmpty() || Tip4ServKey.getPrivateKey().isEmpty() || Tip4ServKey.getPublicKey().isEmpty()) {
             if (entity == null) {
                 LOGGER.warn("Please provide a correct apiKey in tip4serv/tip4serv.key file");
+                return;
             } else {
                 entity.sendMessage(new TextComponent("Please provide a correct apiKey in tip4serv/tip4serv.key file"), entity.getUUID());
             }
