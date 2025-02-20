@@ -35,11 +35,11 @@ public class Tip4ServKey {
             try {
                 BufferedReader reader = new BufferedReader(new FileReader(file));
                 String key = reader.readLine();
+                API_KEY = key;
                 reader.close();
                 if (key != null && !key.isEmpty()) {
                     String[] parts = key.split("\\.");
                     if (parts.length == 3) {
-                        API_KEY = key;
                         T4SMain.checkConnection(null);
                     } else {
                         LOGGER.info("Please provide a valid API key in tip4serv/tip4serv.key");
@@ -56,7 +56,6 @@ public class Tip4ServKey {
     }
 
     public static String getApiKey() {
-        loadKey();
         if (API_KEY == null || API_KEY.isEmpty())
             LOGGER.info("Please provide a valid API key in tip4serv/tip4serv.key");
         else {
