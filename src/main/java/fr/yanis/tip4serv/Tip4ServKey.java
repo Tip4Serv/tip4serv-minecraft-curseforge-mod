@@ -56,6 +56,7 @@ public class Tip4ServKey {
     }
 
     public static String getApiKey() {
+        loadKey();
         if (API_KEY == null || API_KEY.isEmpty())
             LOGGER.info("Please provide a valid API key in tip4serv/tip4serv.key");
         else {
