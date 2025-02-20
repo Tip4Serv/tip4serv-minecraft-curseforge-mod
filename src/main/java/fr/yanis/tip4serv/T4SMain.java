@@ -42,7 +42,7 @@ public class T4SMain {
     private static final String HMAC_SHA1_ALGORITHM = "HmacSHA256";
 
     public static String lastResponse = "";
-    private static final String API_URL = "https://api.tip4serv.com/payments_api_v2_debug.php";
+    private static final String API_URL = "https://api.tip4serv.com/payments_api_v2.php";
     private static final String RESPONSE_FILE_PATH = "tip4serv/response.json";
 
     public T4SMain() {
