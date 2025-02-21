@@ -39,8 +39,8 @@ public class Tip4ServKey {
                 String key = reader.readLine();
                 API_KEY = key.trim();
                 reader.close();
-                if (!key.isEmpty()) {
-                    String[] parts = key.split("\\.");
+                if (API_KEY != null && !API_KEY.isEmpty()) {
+                    String[] parts = API_KEY.split("\\.");
                     if (parts.length == 3) {
                         future.complete(null);
                     } else {
