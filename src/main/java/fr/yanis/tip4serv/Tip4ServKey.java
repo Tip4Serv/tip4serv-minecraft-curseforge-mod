@@ -33,7 +33,7 @@ public class Tip4ServKey {
             try {
                 BufferedReader reader = new BufferedReader(new FileReader(file));
                 String key = reader.readLine();
-                API_KEY = key.trim();
+                API_KEY = key;
                 reader.close();
                 if (API_KEY != null && !API_KEY.isEmpty()) {
                     API_KEY = API_KEY.trim();
