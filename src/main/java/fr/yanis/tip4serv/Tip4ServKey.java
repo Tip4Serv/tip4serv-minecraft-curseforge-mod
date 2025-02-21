@@ -37,9 +37,9 @@ public class Tip4ServKey {
             try {
                 BufferedReader reader = new BufferedReader(new FileReader(file));
                 String key = reader.readLine();
-                API_KEY = key;
+                API_KEY = key.trim();
                 reader.close();
-                if (key != null && !key.isEmpty()) {
+                if (!key.isEmpty()) {
                     String[] parts = key.split("\\.");
                     if (parts.length == 3) {
                         future.complete(null);
