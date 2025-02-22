@@ -1,4 +1,4 @@
-# Tip4Serv Minecraft Mod
+# Tip4Serv Minecraft Forge Mod
 
 Tip4Serv is a platform that allows gaming communities to create their virtual store and sell digital goods.
 
