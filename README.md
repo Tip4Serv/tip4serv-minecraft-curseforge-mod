@@ -28,7 +28,7 @@ Create your store and connect your Minecraft server in **5 minutes** on [Tip4Ser
 
 ---
 
-## Tip4Serv Plugin Command
+## Commands
 
 Use the following command to link your server to Tip4Serv:
 
