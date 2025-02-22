@@ -8,7 +8,7 @@ Our mission is to offer a user-friendly platform that is as simple as possible f
 
 ---
 
-## How Does It Work?
+## How does this Minecraft Forge Mod work?
 
 Tip4Serv checks if a player has made a donation on your Tip4Serv store and delivers the order in a minute (e.g., group, money, etc.) by executing commands in the server console.
 
