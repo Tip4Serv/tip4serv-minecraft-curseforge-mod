@@ -1,8 +1,8 @@
-# Tip4Serv
+# Tip4Serv Minecraft Mod
 
 Tip4Serv is a platform that allows gaming communities to create their virtual store and sell digital goods.
 
-Community management and content creation are heavy work. We want to help save time by managing donations and automatically rewarding players.
+Community management and content creation are heavy work. We want to help save time by managing Minecraft donations and automatically rewarding players.
 
 Our mission is to offer a user-friendly platform that is as simple as possible for both the creator and the buyer.
 
