@@ -33,5 +33,7 @@ Create your store and connect your Minecraft server in **5 minutes** on [Tip4Ser
 Use the following command to link your server to Tip4Serv:
 
 **tip4serv connect** - Link your server to Tip4Serv (Ensure the API key is correctly set in tip4serv/tip4serv.key).
+
 **tip4serv reload** - Deliver pending orders if there are any.
+
 **/storelink** - Show a link to the store in the server chat.
