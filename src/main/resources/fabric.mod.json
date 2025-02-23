@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "t4s",
+  "version": "${version}",
+  "name": "Tip4Serv",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/t4s/icon.png",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "fr.yanis.t4s.T4SMain"
+    ]
+  },
+  "mixins": [
+    "t4s.mixins.json",
+    {
+      "config": "t4s.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
