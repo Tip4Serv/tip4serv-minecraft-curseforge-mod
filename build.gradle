@@ -80,6 +80,12 @@ jar {
     }
 }
 
+tasks.named('jar', Jar).configure {
+    archiveBaseName.set("[FABRIC] Tip4Serv")
+    archiveVersion.set("${minecraft_version}-${mod_version}")
+    destinationDirectory.set(file("$buildDir/libs"))
+}
+
 // configure the maven publication
 publishing {
     publications {
