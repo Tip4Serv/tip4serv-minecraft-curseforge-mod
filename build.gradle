@@ -74,6 +74,12 @@ java {
     withSourcesJar()
 }
 
+tasks.named('jar', Jar).configure {
+    archiveBaseName.set("[FABRIC] Tip4Serv")
+    archiveVersion.set("${minecraft_version}-${mod_version}")
+    destinationDirectory.set(file("$buildDir/libs"))
+}
+
 jar {
     from("LICENSE") {
         rename { "${it}_${project.archivesBaseName}" }
