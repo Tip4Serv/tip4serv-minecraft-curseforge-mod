@@ -180,6 +180,10 @@ tasks.named('jar', Jar).configure {
                     "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")])
     }
 
+    archiveBaseName.set("[FORGE] Tip4Serv")
+    archiveVersion.set("${minecraft_version}-${mod_version}")
+    destinationDirectory.set(file("$buildDir/libs"))
+
     // This is the preferred method to reobfuscate your jar file
     finalizedBy 'reobfJar'
 }
