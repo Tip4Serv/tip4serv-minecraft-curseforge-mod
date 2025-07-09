@@ -48,7 +48,15 @@ public class T4SMain {
         pluginInstance = this;
 
         File file = new File(key_path);
-        file.mkdirs();
+        if (!file.exists()) {
+            try {
+                file.getParentFile().mkdirs();
+                file.createNewFile();
+                System.out.println("[Tip4Serv] Created new tip4serv.key file");
+            } catch (IOException e) {
+                System.out.println("[Tip4Serv] Failed to create tip4serv.key: " + e.getMessage());
+            }
+        }
 
         System.out.println("[Tip4Serv] Plugin initialized");
     }
@@ -91,22 +99,21 @@ public class T4SMain {
                 boolean update_now = false;
 
                 for (int i1 = 0; i1 < infosArr.size(); i1++) {
-                    JsonObject new_obj = new JsonObject();
                     JsonObject infos_obj = (JsonObject) infosArr.get(i1);
-                    String player_connected, player_str, action;
                     String id = safeGetAsString(infos_obj, "id");
-                    action = safeGetAsString(infos_obj, "action");
-                    player_str = safeGetAsString(infos_obj, "player");
+                    String action = safeGetAsString(infos_obj, "action");
+                    String player_str = safeGetAsString(infos_obj, "player");
                     String uuidStr = safeGetAsString(infos_obj, "uuid");
                     JsonArray cmds = infos_obj.get("cmds").getAsJsonArray();
-
-                    System.out.println("[Tip4Serv] Processing payment ID " + id + " for player " + player_str);
                     String date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+
+                    JsonObject new_obj = new JsonObject();
+                    System.out.println("[Tip4Serv] Processing payment ID " + id + " for player " + player_str);
                     new_obj.addProperty("date", date);
                     new_obj.addProperty("action", action);
                     JsonObject new_cmds = new JsonObject();
 
-                    player_connected = check_online_player(safeGetAsString(infos_obj, "uuid"), safeGetAsString(infos_obj, "player"));
+                    String player_connected = check_online_player(uuidStr, player_str);
                     System.out.println("[Tip4Serv] Player connection status: " + (player_connected != null ? "Online" : "Offline"));
 
                     if (player_connected != null) player_str = player_connected;
@@ -165,7 +172,7 @@ public class T4SMain {
                 System.out.println("[Tip4Serv] Error in scheduled task:");
                 e.printStackTrace();
             }
-        }, 10, requestIntervalMinutes * 60, TimeUnit.SECONDS);
+        }, 1, requestIntervalMinutes, TimeUnit.MINUTES);
         System.out.println("[Tip4Serv] Scheduler started successfully");
     }
 
@@ -179,14 +186,13 @@ public class T4SMain {
     }
 
     private static CompletableFuture<Void> writeResponseFileAsync(String json) {
-        CompletableFuture<Void> future = new CompletableFuture<>();
-        try {
-            Files.writeString(Paths.get(response_path), json, StandardCharsets.UTF_8);
-            future.complete(null);
-        } catch (IOException e) {
-            future.completeExceptionally(e);
-        }
-        return future;
+        return CompletableFuture.runAsync(() -> {
+            try {
+                Files.writeString(Paths.get(response_path), json, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                throw new CompletionException(e);
+            }
+        });
     }
 
     public static String readFile(String path, Charset encoding) throws IOException {
@@ -225,6 +231,10 @@ public class T4SMain {
                 outputStream.write(jsonEncoded.getBytes());
                 outputStream.flush();
             }
+
+            int responseCode = connection.getResponseCode();
+            System.out.println("[Tip4Serv] POST response code update: " + responseCode);
+
             StringBuilder response = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
                 String line;
@@ -264,6 +274,8 @@ public class T4SMain {
             if (cmd.equals("update")) {
                 clearResponseFile();
             }
+            int responseCode = connection.getResponseCode();
+            System.out.println("[Tip4Serv] POST response code: " + responseCode);
             System.out.println("[Tip4Serv] Response - " + cmd + " : " + response);
             return response.toString();
         } catch (Exception e) {
