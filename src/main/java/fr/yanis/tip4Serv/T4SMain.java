@@ -39,7 +39,6 @@ public class T4SMain {
     private static String response_path = "plugins/tip4serv/response.json";
     private static T4SMain pluginInstance;
     public static String lastResponse = "";
-    public static T4SConfig config;
 
     private static final String API_URL = "https://api.tip4serv.com/payments_api_v2.php";
 
@@ -49,24 +48,14 @@ public class T4SMain {
         pluginInstance = this;
 
         T4SConfig.initConfig();
-
-        File file = new File(key_path);
-        if (!file.exists()) {
-            try {
-                file.getParentFile().mkdirs();
-                file.createNewFile();
-                System.out.println("[Tip4Serv] Created new tip4serv.key file");
-            } catch (IOException e) {
-                System.out.println("[Tip4Serv] Failed to create tip4serv.key: " + e.getMessage());
-            }
-        }
+        Tip4ServKey.init();
 
         System.out.println("[Tip4Serv] Plugin initialized");
     }
 
     public void launchRequest(boolean log){
         try {
-            String key_str = readFile(key_path, StandardCharsets.UTF_8).replaceAll("[\\n\t ]", "");
+            String key_str = Tip4ServKey.getApiKey();
             if (!key_str.contains(".")) {
                 System.out.println("[Tip4Serv] Please provide a correct apiKey in plugins/tip4serv/tip4serv.key file");
                 return;
@@ -179,20 +168,18 @@ public class T4SMain {
     @Subscribe
     public void onProxyInitialization(ProxyInitializeEvent event) {
 
-        Tip4ServKey.loadKey();
-
         server.getCommandManager().register("tip4proxy", new Tip4servCommand());
-        System.out.println("[Tip4Serv] Registered command");
+
+        Tip4ServKey.loadKey().thenRun(() -> {
+            launchRequest(true);
+        });
 
         scheduler = Executors.newSingleThreadScheduledExecutor();
-        int requestIntervalMinutes = 1;
-        System.out.println("[Tip4Serv] Starting scheduler with " + requestIntervalMinutes + " minute interval");
-
-        launchRequest(true);
 
         scheduler.scheduleAtFixedRate(() -> {
             launchRequest(false);
-        }, 1, requestIntervalMinutes, TimeUnit.MINUTES);
+        }, T4SConfig.getInterval(), T4SConfig.getInterval(), TimeUnit.MINUTES);
+
         System.out.println("[Tip4Serv] Scheduler started successfully");
     }
 
@@ -213,11 +200,6 @@ public class T4SMain {
                 throw new CompletionException(e);
             }
         });
-    }
-
-    public static String readFile(String path, Charset encoding) throws IOException {
-        byte[] encoded = Files.readAllBytes(Paths.get(path));
-        return new String(encoded, encoding);
     }
 
     public static String check_online_player(String uuid_str, String mc_username) {
@@ -338,31 +320,38 @@ public class T4SMain {
             String connect = args.length >= 1 ? args[0] : "";
             String key_path = "plugins/tip4serv/tip4serv.key";
             if (connect.equalsIgnoreCase("connect")) {
-                try {
-                    System.out.println("[Tip4Serv] Connect command executed by " + sender.toString());
-                    String key_str = readFile(key_path, StandardCharsets.UTF_8).replaceAll("[\\n\t ]", "");
-                    if (!key_str.contains(".")) {
-                        sender.sendMessage(net.kyori.adventure.text.Component.text("§c[Tip4serv error] please paste your KEY (see MY SERVERS on Tip4serv.com) in the tip4serv/tip4serv.key file of your server and retype the command.§r"));
+                String key_str = Tip4ServKey.getApiKey();
+                if (!key_str.contains(".")) {
+                    sender.sendMessage(net.kyori.adventure.text.Component.text("§c[Tip4serv error] please paste your KEY (see MY SERVERS on Tip4serv.com) in the tip4serv/tip4serv.key file of your server and retype the command.§r"));
+                } else {
+                    String lortu = sendHttpRequest(key_str);
+                    if (lortu.contains("Tip4serv error")) {
+                        sender.sendMessage(net.kyori.adventure.text.Component.text("§c" + lortu + "§r"));
                     } else {
-                        String lortu = sendHttpRequest(key_str);
-                        if (lortu.contains("Tip4serv error")) {
-                            sender.sendMessage(net.kyori.adventure.text.Component.text("§c" + lortu + "§r"));
-                        } else {
-                            sender.sendMessage(net.kyori.adventure.text.Component.text("§a" + lortu + "§r"));
-                        }
+                        sender.sendMessage(net.kyori.adventure.text.Component.text("§a" + lortu + "§r"));
                     }
-                } catch (IOException e1) {
-                    System.out.println("[Tip4Serv] Command execution error:");
-                    e1.printStackTrace();
-                    sender.sendMessage(net.kyori.adventure.text.Component.text("§c[Tip4serv error] " + e1 + "§r"));
                 }
+            }  else if (connect.equalsIgnoreCase("reload")){
+
+                try {
+                    Tip4ServKey.loadKey().thenRun(() -> T4SMain.getInstance().launchRequest(true));
+                } catch (Exception e) {
+                    System.out.println("[Tip4Serv] Error reloading config:");
+                    e.printStackTrace();
+                    sender.sendMessage(net.kyori.adventure.text.Component.text("§c[Tip4serv error] " + e + "§r"));
+                }
+
             } else {
-                sender.sendMessage(net.kyori.adventure.text.Component.text("§aUse: /tip4proxy connect§r"));
+                sender.sendMessage(net.kyori.adventure.text.Component.text("§aUse: /tip4proxy [connect/reload]§r"));
             }
         }
     }
 
     private static void clearResponseFile() {
         writeResponseFileAsync("");
+    }
+
+    public static T4SMain getInstance() {
+        return pluginInstance;
     }
 }

@@ -19,11 +19,14 @@ public class Tip4ServKey {
 
         if (!file.exists()) {
             try {
+                file.getParentFile().mkdirs();
                 file.createNewFile();
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
+
+
     }
 
     public static CompletableFuture<Void> loadKey(){
