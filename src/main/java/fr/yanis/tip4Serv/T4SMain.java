@@ -39,6 +39,7 @@ public class T4SMain {
     private static String response_path = "plugins/tip4serv/response.json";
     private static T4SMain pluginInstance;
     public static String lastResponse = "";
+    public static T4SConfig config;
 
     private static final String API_URL = "https://api.tip4serv.com/payments_api_v2.php";
 
@@ -46,6 +47,8 @@ public class T4SMain {
     public T4SMain(ProxyServer server) {
         this.server = server;
         pluginInstance = this;
+
+        T4SConfig.initConfig();
 
         File file = new File(key_path);
         if (!file.exists()) {
@@ -61,6 +64,118 @@ public class T4SMain {
         System.out.println("[Tip4Serv] Plugin initialized");
     }
 
+    public void launchRequest(boolean log){
+        try {
+            String key_str = readFile(key_path, StandardCharsets.UTF_8).replaceAll("[\\n\t ]", "");
+            if (!key_str.contains(".")) {
+                System.out.println("[Tip4Serv] Please provide a correct apiKey in plugins/tip4serv/tip4serv.key file");
+                return;
+            }
+
+            String Json_string = sendHttpRequest("yes");
+
+            if (Json_string.contains("[Tip4serv info] No pending payments found")) {
+                return;
+            } else if (Json_string.contains("[Tip4serv error]")) {
+                if (log)
+                    System.out.println(Json_string);
+                return;
+            } else if (Json_string.contains("[Tip4serv info]")) {
+                if(log)
+                    System.out.println(Json_string);
+                return;
+            } else if (Json_string.isEmpty() || Json_string.equals("false")) {
+                if (log)
+                    System.out.println("[Tip4Serv] No payments to process");
+                return;
+            }
+
+            JsonArray infosArr = JsonParser.parseString(Json_string).getAsJsonArray();
+            if (log)
+                System.out.println("[Tip4Serv] Processing " + infosArr.size() + " payments");
+            JsonObject new_json = new JsonObject();
+            boolean update_now = false;
+
+            for (int i1 = 0; i1 < infosArr.size(); i1++) {
+                JsonObject infos_obj = (JsonObject) infosArr.get(i1);
+                String id = safeGetAsString(infos_obj, "id");
+                String action = safeGetAsString(infos_obj, "action");
+                String player_str = safeGetAsString(infos_obj, "player");
+                String uuidStr = safeGetAsString(infos_obj, "uuid");
+                JsonArray cmds = infos_obj.get("cmds").getAsJsonArray();
+                String date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+
+                JsonObject new_obj = new JsonObject();
+
+                if (log)
+                    System.out.println("[Tip4Serv] Processing payment ID " + id + " for player " + player_str);
+
+                new_obj.addProperty("date", date);
+                new_obj.addProperty("action", action);
+                JsonObject new_cmds = new JsonObject();
+
+                String player_connected = check_online_player(uuidStr, player_str);
+
+                if (log)
+                    System.out.println("[Tip4Serv] Player connection status: " + (player_connected != null ? "Online" : "Offline"));
+
+                if (player_connected != null) player_str = player_connected;
+
+                List<String> cmds_failed = new ArrayList<>();
+                boolean redo_cmd = false;
+
+                for (int i2 = 0; i2 < cmds.size(); i2++) {
+                    JsonElement elem = cmds.get(i2);
+
+                    if (!elem.isJsonObject()) {
+                        continue;
+                    }
+
+                    JsonObject cmds_obj = elem.getAsJsonObject();
+
+                    String state = safeGetAsString(cmds_obj, "state");
+                    String cmd_id = safeGetAsString(cmds_obj, "id");
+                    String cmd_str = safeGetAsString(cmds_obj, "str").replace("{minecraft_username}", player_str);
+
+                    if (state.equals("1")) {
+                        if (player_connected == null) {
+                            cmds_failed.add(cmd_id);
+                            redo_cmd = true;
+                        } else {
+                            server.getCommandManager().executeAsync(server.getConsoleCommandSource(), cmd_str);
+                            new_cmds.addProperty(cmd_id, 3);
+                            update_now = true;
+                        }
+                    } else if (state.equals("0")) {
+                        server.getCommandManager().executeAsync(server.getConsoleCommandSource(), cmd_str);
+                        new_cmds.addProperty(cmd_id, 3);
+                        update_now = true;
+                    } else {
+                        new_cmds.addProperty(cmd_id, 14);
+                        cmds_failed.add(cmd_id);
+                        redo_cmd = true;
+                    }
+                }
+                new_obj.add("cmds", new_cmds);
+                new_obj.addProperty("status", redo_cmd ? 14 : 3);
+                new_json.add(id, new_obj);
+            }
+
+            lastResponse = new_json.toString();
+            boolean finalUpdate_now = update_now;
+
+            writeResponseFileAsync(lastResponse).thenRun(() -> {
+                if (finalUpdate_now) {
+                    sendResponse();
+                }
+            });
+
+        } catch (Exception e) {
+            System.out.println("[Tip4Serv] Error in scheduled task:");
+            e.printStackTrace();
+        }
+    }
+
     @Subscribe
     public void onProxyInitialization(ProxyInitializeEvent event) {
 
@@ -73,105 +188,10 @@ public class T4SMain {
         int requestIntervalMinutes = 1;
         System.out.println("[Tip4Serv] Starting scheduler with " + requestIntervalMinutes + " minute interval");
 
+        launchRequest(true);
+
         scheduler.scheduleAtFixedRate(() -> {
-            try {
-                System.out.println("[Tip4Serv] Running scheduled task");
-                String key_str = readFile(key_path, StandardCharsets.UTF_8).replaceAll("[\\n\t ]", "");
-                if (!key_str.contains(".")) {
-                    System.out.println("[Tip4Serv] Please provide a correct apiKey in plugins/tip4serv/tip4serv.key file");
-                    return;
-                }
-                String Json_string = sendHttpRequest("yes");
-
-                if (Json_string.contains("[Tip4serv info] No pending payments found")) {
-                    return;
-                } else if (Json_string.contains("[Tip4serv error]")) {
-                    System.out.println(Json_string);
-                    return;
-                } else if (Json_string.contains("[Tip4serv info]")) {
-                    System.out.println(Json_string);
-                    return;
-                }
-
-                JsonArray infosArr = JsonParser.parseString(Json_string).getAsJsonArray();
-                System.out.println("[Tip4Serv] Processing " + infosArr.size() + " payments");
-                JsonObject new_json = new JsonObject();
-                boolean update_now = false;
-
-                for (int i1 = 0; i1 < infosArr.size(); i1++) {
-                    JsonObject infos_obj = (JsonObject) infosArr.get(i1);
-                    String id = safeGetAsString(infos_obj, "id");
-                    String action = safeGetAsString(infos_obj, "action");
-                    String player_str = safeGetAsString(infos_obj, "player");
-                    String uuidStr = safeGetAsString(infos_obj, "uuid");
-                    JsonArray cmds = infos_obj.get("cmds").getAsJsonArray();
-                    String date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
-
-                    JsonObject new_obj = new JsonObject();
-                    System.out.println("[Tip4Serv] Processing payment ID " + id + " for player " + player_str);
-                    new_obj.addProperty("date", date);
-                    new_obj.addProperty("action", action);
-                    JsonObject new_cmds = new JsonObject();
-
-                    String player_connected = check_online_player(uuidStr, player_str);
-                    System.out.println("[Tip4Serv] Player connection status: " + (player_connected != null ? "Online" : "Offline"));
-
-                    if (player_connected != null) player_str = player_connected;
-
-                    List<String> cmds_failed = new ArrayList<>();
-                    boolean redo_cmd = false;
-
-                    System.out.println("[Tip4Serv] Processing " + cmds.size() + " commands");
-                    for (int i2 = 0; i2 < cmds.size(); i2++) {
-                        JsonElement elem = cmds.get(i2);
-
-                        if (!elem.isJsonObject()) {
-                            continue;
-                        }
-
-                        JsonObject cmds_obj = elem.getAsJsonObject();
-
-                        String state = safeGetAsString(cmds_obj, "state");
-                        String cmd_id = safeGetAsString(cmds_obj, "id");
-                        String cmd_str = safeGetAsString(cmds_obj, "str").replace("{minecraft_username}", player_str);
-
-                        if (state.equals("1")) {
-                            if (player_connected == null) {
-                                cmds_failed.add(cmd_id);
-                                redo_cmd = true;
-                            } else {
-                                server.getCommandManager().executeAsync(server.getConsoleCommandSource(), cmd_str);
-                                new_cmds.addProperty(cmd_id, 3);
-                                update_now = true;
-                            }
-                        } else if (state.equals("0")) {
-                            server.getCommandManager().executeAsync(server.getConsoleCommandSource(), cmd_str);
-                            new_cmds.addProperty(cmd_id, 3);
-                            update_now = true;
-                        } else {
-                            new_cmds.addProperty(cmd_id, 14);
-                            cmds_failed.add(cmd_id);
-                            redo_cmd = true;
-                        }
-                    }
-                    new_obj.add("cmds", new_cmds);
-                    new_obj.addProperty("status", redo_cmd ? 14 : 3);
-                    new_json.add(id, new_obj);
-                }
-
-                lastResponse = new_json.toString();
-                boolean finalUpdate_now = update_now;
-
-                writeResponseFileAsync(lastResponse).thenRun(() -> {
-                    if (finalUpdate_now) {
-                        sendResponse();
-                    }
-                });
-
-            } catch (Exception e) {
-                System.out.println("[Tip4Serv] Error in scheduled task:");
-                e.printStackTrace();
-            }
+            launchRequest(false);
         }, 1, requestIntervalMinutes, TimeUnit.MINUTES);
         System.out.println("[Tip4Serv] Scheduler started successfully");
     }
@@ -337,7 +357,7 @@ public class T4SMain {
                     sender.sendMessage(net.kyori.adventure.text.Component.text("§c[Tip4serv error] " + e1 + "§r"));
                 }
             } else {
-                sender.sendMessage(net.kyori.adventure.text.Component.text("§aUse: /tip4serv connect§r"));
+                sender.sendMessage(net.kyori.adventure.text.Component.text("§aUse: /tip4proxy connect§r"));
             }
         }
     }
