@@ -235,8 +235,6 @@ public class T4SMain {
             }
 
             int responseCode = connection.getResponseCode();
-            System.out.println("[Tip4Serv] POST response code update: " + responseCode);
-
             StringBuilder response = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
                 String line;
@@ -246,7 +244,7 @@ public class T4SMain {
             }
             sendHttpRequest("update");
         } catch (Exception e) {
-            System.out.println("[Tip4Serv] Error when sending reponse :" + e.getMessage());
+            System.out.println(e.getMessage());
         }
     }
 
@@ -277,8 +275,6 @@ public class T4SMain {
                 clearResponseFile();
             }
             int responseCode = connection.getResponseCode();
-            System.out.println("[Tip4Serv] POST response code: " + responseCode);
-            System.out.println("[Tip4Serv] Response - " + cmd + " : " + response);
             return response.toString();
         } catch (Exception e) {
             return "false";
@@ -320,17 +316,19 @@ public class T4SMain {
             String connect = args.length >= 1 ? args[0] : "";
             String key_path = "plugins/tip4serv/tip4serv.key";
             if (connect.equalsIgnoreCase("connect")) {
-                String key_str = Tip4ServKey.getApiKey();
-                if (!key_str.contains(".")) {
-                    sender.sendMessage(net.kyori.adventure.text.Component.text("§c[Tip4serv error] please paste your KEY (see MY SERVERS on Tip4serv.com) in the tip4serv/tip4serv.key file of your server and retype the command.§r"));
-                } else {
-                    String lortu = sendHttpRequest(key_str);
-                    if (lortu.contains("Tip4serv error")) {
-                        sender.sendMessage(net.kyori.adventure.text.Component.text("§c" + lortu + "§r"));
+                Tip4ServKey.loadKey().thenRun(() -> {
+                    String key_str = Tip4ServKey.getApiKey();
+                    if (!key_str.contains(".")) {
+                        sender.sendMessage(net.kyori.adventure.text.Component.text("§c[Tip4serv error] please paste your KEY (see MY SERVERS on Tip4serv.com) in the tip4serv/tip4serv.key file of your server and retype the command.§r"));
                     } else {
-                        sender.sendMessage(net.kyori.adventure.text.Component.text("§a" + lortu + "§r"));
+                        String lortu = sendHttpRequest(key_str);
+                        if (lortu.contains("Tip4serv error")) {
+                            sender.sendMessage(net.kyori.adventure.text.Component.text("§c" + lortu + "§r"));
+                        } else {
+                            sender.sendMessage(net.kyori.adventure.text.Component.text("§a" + lortu + "§r"));
+                        }
                     }
-                }
+                });
             }  else if (connect.equalsIgnoreCase("reload")){
 
                 try {
