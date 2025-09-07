@@ -117,7 +117,6 @@ public class T4SMain {
 
                 for (int i1 = 0; i1 < infosArr.size(); i1++) {
                     JsonObject infos_obj = infosArr.get(i1).getAsJsonObject();
-                    // Safely extract values from the JSON object
                     String id = safeGetAsString(infos_obj, "id");
                     String action = safeGetAsString(infos_obj, "action");
                     String player_str = safeGetAsString(infos_obj, "player");
@@ -308,6 +307,9 @@ public class T4SMain {
                     response.append(line);
                 }
             }
+
+            System.out.println(" Response - Sending - from Tip4Serv API: " + response.toString());
+
             sendHttpRequest("update");
         } catch (Exception ignored) {
         }
@@ -336,11 +338,15 @@ public class T4SMain {
                     response.append(line);
                 }
             }
+
+            System.out.println(" Response from Tip4Serv API: " + response.toString());
+
             if (cmd.equals("update")) {
                 clearResponseFile();
             }
             return response.toString();
         } catch (Exception e) {
+            System.out.println(e.getMessage());
             return "false";
         }
     }
