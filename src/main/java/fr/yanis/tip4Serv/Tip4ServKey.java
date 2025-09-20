@@ -1,16 +1,15 @@
 package fr.yanis.tip4Serv;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.util.concurrent.CompletableFuture;
+import java.util.logging.Logger;
 
 public class Tip4ServKey {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(Tip4ServKey.class);
+    private static final Logger LOGGER = Logger.getLogger("Tip4Serv");
 
     private static String API_KEY = "";
 
