@@ -201,7 +201,7 @@ public class T4Main {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
 
         dispatcher.register(
-            Commands.literal("tip4serv")
+            Commands.literal("tip4serv").requires(source -> source.hasPermission(4))
                 .then(Commands.literal("connect")
                     .executes(this::executeConnect))
                 .then(Commands.literal("reload")
@@ -246,7 +246,7 @@ public class T4Main {
     }
 
     private int executeHelp(CommandContext<CommandSourceStack> context) {
-        context.getSource().sendSuccess(() -> Component.literal("§aUse: /tip4neoforge [connect/reload]§r"), false);
+        context.getSource().sendSuccess(() -> Component.literal("§aUse: /tip4serv [connect/reload]§r"), false);
         return 1;
     }
 
