@@ -12,6 +12,8 @@ import fr.yanis.tip4serv.neoforge.Tip4ServKey;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Style;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.IEventBus;
@@ -200,14 +202,40 @@ public class T4Main {
     public void onRegisterCommands(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
 
+        // Commande /storelink séparée sans permission
         dispatcher.register(
-            Commands.literal("tip4serv").requires(source -> source.hasPermission(4))
+            Commands.literal("storelink")
+                .executes(this::executeStoreLink)
+        );
+
+        // Commande /tip4serv avec permissions
+        dispatcher.register(
+            Commands.literal("tip4serv")
                 .then(Commands.literal("connect")
+                    .requires(source -> source.hasPermission(4))
                     .executes(this::executeConnect))
                 .then(Commands.literal("reload")
+                    .requires(source -> source.hasPermission(4))
                     .executes(this::executeReload))
                 .executes(this::executeHelp)
         );
+    }
+
+    private int executeStoreLink(CommandContext<CommandSourceStack> context){
+        CommandSourceStack source = context.getSource();
+
+        String storeLink = T4Config.getStoreLink();
+        String storeMessage = T4Config.getStoreMessage().replace("{storeLink}", storeLink);
+
+        // Créer un composant cliquable
+        Component linkComponent = Component.literal(storeMessage)
+            .setStyle(Style.EMPTY
+                .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, storeLink))
+            );
+
+        source.sendSuccess(() -> linkComponent, false);
+
+        return 1;
     }
 
     private int executeConnect(CommandContext<CommandSourceStack> context) {
@@ -234,6 +262,7 @@ public class T4Main {
         CommandSourceStack source = context.getSource();
 
         try {
+            T4Config.loadConfig(); // Recharge la config
             Tip4ServKey.loadKey().thenRun(() -> T4Main.getInstance().launchRequest(true));
             source.sendSuccess(() -> Component.literal("§a[Tip4Serv] Configuration reloaded§r"), true);
         } catch (Exception e) {
