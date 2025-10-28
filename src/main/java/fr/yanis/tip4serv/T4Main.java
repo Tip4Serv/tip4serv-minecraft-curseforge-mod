@@ -124,6 +124,7 @@ public class T4Main {
 
                 List<String> cmds_failed = new ArrayList<>();
                 boolean redo_cmd = false;
+                boolean hasSuccessfulCmd = false;
 
                 for (int i2 = 0; i2 < cmds.size(); i2++) {
                     JsonElement elem = cmds.get(i2);
@@ -148,6 +149,7 @@ public class T4Main {
                             });
                             new_cmds.addProperty(cmd_id, 3);
                             update_now = true;
+                            hasSuccessfulCmd = true;
                         }
                     } else if (state.equals("0")) {
                         server.execute(() -> {
@@ -155,12 +157,26 @@ public class T4Main {
                         });
                         new_cmds.addProperty(cmd_id, 3);
                         update_now = true;
+                        hasSuccessfulCmd = true;
                     } else {
                         new_cmds.addProperty(cmd_id, 14);
                         cmds_failed.add(cmd_id);
                         redo_cmd = true;
                     }
                 }
+
+                // Envoyer le message de succès au joueur s'il est connecté et a reçu des commandes
+                if (player_connected != null && hasSuccessfulCmd) {
+                    String finalPlayerName = player_str;
+                    server.execute(() -> {
+                        ServerPlayer player = server.getPlayerList().getPlayerByName(finalPlayerName);
+                        if (player != null) {
+                            String successMessage = T4Config.getMessageSuccess();
+                            player.sendSystemMessage(Component.literal(successMessage));
+                        }
+                    });
+                }
+
                 new_obj.add("cmds", new_cmds);
                 new_obj.addProperty("status", redo_cmd ? 14 : 3);
                 new_json.add(id, new_obj);
@@ -208,14 +224,13 @@ public class T4Main {
                 .executes(this::executeStoreLink)
         );
 
-        // Commande /tip4serv avec permissions
+        // Commande /tip4serv avec permissions (cachée aux non-admins)
         dispatcher.register(
             Commands.literal("tip4serv")
+                .requires(source -> source.hasPermission(4)) // Cache la commande aux non-admins
                 .then(Commands.literal("connect")
-                    .requires(source -> source.hasPermission(4))
                     .executes(this::executeConnect))
                 .then(Commands.literal("reload")
-                    .requires(source -> source.hasPermission(4))
                     .executes(this::executeReload))
                 .executes(this::executeHelp)
         );
