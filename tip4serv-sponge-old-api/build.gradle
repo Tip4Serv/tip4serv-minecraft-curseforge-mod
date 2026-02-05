@@ -1,0 +1,47 @@
+plugins {
+    id 'java'
+}
+
+group = 'fr.murga'
+version = '1.3.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+    maven { url 'https://repo.spongepowered.org/repository/maven-public/' }
+}
+
+dependencies {
+    compileOnly 'org.spongepowered:spongeapi:8.2.0'
+    annotationProcessor 'org.spongepowered:spongeapi:8.2.0'
+    implementation 'com.googlecode.json-simple:json-simple:1.1.1'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs += ['-Aorg.spongepowered.plugin.processor.classname=fr.murga.tip4serv.Tip4ServSponge']
+}
+
+jar {
+    archiveBaseName = 'Tip4Serv-Sponge'
+
+    manifest {
+        attributes(
+            'Implementation-Title': 'Tip4Serv',
+            'Implementation-Version': archiveVersion
+        )
+    }
+
+    from(sourceSets.main.output) {
+        include '**/*'
+    }
+
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

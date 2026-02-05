@@ -1,0 +1,28 @@
+{
+  "loader": {
+    "name": "java_plain",
+    "version": "1.0"
+  },
+  "license": "MIT",
+  "global": {
+    "version": "1.3.0",
+    "links": {
+      "homepage": "https://tip4serv.com"
+    },
+    "contributors": [
+      {
+        "name": "Tip4Serv SAS",
+        "description": "Author"
+      }
+    ]
+  },
+  "plugins": [
+    {
+      "id": "tip4serv",
+      "name": "Tip4Serv",
+      "version": "1.3.0",
+      "entrypoint": "fr.murga.tip4serv.Tip4ServSponge",
+      "description": "Tip4Serv donation store integration for Sponge"
+    }
+  ]
+}

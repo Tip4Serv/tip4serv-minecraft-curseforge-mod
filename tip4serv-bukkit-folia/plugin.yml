@@ -1,0 +1,23 @@
+name: Tip4serv
+api-version: '1.13'
+version: 1.3.0
+author: Murgator
+main: fr.murga.tip4serv.Main
+folia-supported: true
+
+commands:
+  tip4serv:
+    description: Connect and manage Tip4serv integration
+    permission: tip4serv.connect
+    usage: /<command> <connect|reload>
+  storelink:
+    description: Display the store link in chat
+    usage: /<command>
+
+permissions:
+  tip4serv.connect:
+    description: Allows connecting to Tip4serv
+    default: op
+  tip4serv.reload:
+    description: Allows reloading Tip4serv configuration
+    default: op
