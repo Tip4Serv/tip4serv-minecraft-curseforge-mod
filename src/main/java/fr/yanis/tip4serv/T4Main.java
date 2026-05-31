@@ -23,6 +23,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import org.slf4j.Logger;
 
 import javax.crypto.Mac;
@@ -205,13 +206,25 @@ public class T4Main {
             launchRequest(true);
         });
 
-        scheduler = Executors.newSingleThreadScheduledExecutor();
+        scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "Tip4Serv-Scheduler");
+            t.setDaemon(true);
+            return t;
+        });
 
         scheduler.scheduleAtFixedRate(() -> {
             launchRequest(false);
         }, T4Config.getInterval(), T4Config.getInterval(), TimeUnit.MINUTES);
 
         LOGGER.info("[Tip4Serv] Scheduler started successfully");
+    }
+
+    @SubscribeEvent
+    public void onServerStopping(ServerStoppingEvent event) {
+        if (scheduler != null) {
+            scheduler.shutdownNow();
+            scheduler = null;
+        }
     }
 
     @SubscribeEvent
