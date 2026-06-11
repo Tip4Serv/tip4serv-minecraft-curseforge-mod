@@ -26,12 +26,10 @@ import javax.crypto.spec.SecretKeySpec;
 import javax.net.ssl.HttpsURLConnection;
 import java.io.*;
 import java.net.URL;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -42,8 +40,15 @@ public class T4SMain {
     private static final String HMAC_SHA1_ALGORITHM = "HmacSHA256";
 
     public static String lastResponse = "";
-    private static final String API_URL = "https://api.tip4serv.com/payments_api_v2.php";
+    private static final String API_BASE_URL = "https://api.tip4serv.com/v1/store/server/";
+    private static final String USER_AGENT = "Tip4Serv-Forge/1.18.2";
     private static final String RESPONSE_FILE_PATH = "tip4serv/response.json";
+    private static final long COMMAND_DELAY_MS = 1000L;
+    private static final ScheduledExecutorService COMMAND_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "Tip4Serv-CommandScheduler");
+        t.setDaemon(true);
+        return t;
+    });
 
     public T4SMain() {
         LOGGER.info("Initializing Tip4Serv mod instance.");
@@ -83,48 +88,51 @@ public class T4SMain {
                         LOGGER.warn("Please provide a correct apiKey in tip4serv/tip4serv.key file");
                     return;
                 }
-                String json_string = sendHttpRequest("yes");
 
-                if (json_string.contains("[Tip4serv info] No pending payments found")) {
+                sendPendingUpdates();
+
+                String json_string = httpGetCommands();
+                if (json_string == null) {
                     if (log)
-                        LOGGER.info("No pending payments found.");
-                    return;
-                } else if (json_string.contains("[Tip4serv error]")) {
-                    if (log)
-                        LOGGER.warn("Error while checking payments: " + json_string);
-                    return;
-                } else if (json_string.contains("[Tip4serv info]")) {
-                    if (log)
-                        LOGGER.info("API info response received: " + json_string);
+                        LOGGER.warn("Could not reach the Tip4Serv API.");
                     return;
                 }
 
-                JsonArray infosArr = JsonParser.parseString(json_string).getAsJsonArray();
-                JsonObject new_json = new JsonObject();
-                boolean update_now = false;
+                JsonElement parsed = JsonParser.parseString(json_string);
+                if (!parsed.isJsonArray()) {
+                    if (log)
+                        LOGGER.info("No pending payments found.");
+                    return;
+                }
+                JsonArray paymentsArr = parsed.getAsJsonArray();
+                if (paymentsArr.size() == 0) {
+                    clearResponseFile();
+                    if (log)
+                        LOGGER.info("No pending payments found.");
+                    return;
+                }
 
-                for (int i1 = 0; i1 < infosArr.size(); i1++) {
-                    JsonObject infos_obj = infosArr.get(i1).getAsJsonObject();
-                    // Safely extract values from the JSON object
-                    String id = safeGetAsString(infos_obj, "id");
-                    String action = safeGetAsString(infos_obj, "action");
-                    String player_str = safeGetAsString(infos_obj, "player");
-                    String uuidStr = safeGetAsString(infos_obj, "uuid");
-                    JsonArray cmds = infos_obj.get("cmds").getAsJsonArray();
-                    String date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+                JsonObject updatePayload = new JsonObject();
+                boolean hasExecutedCommands = false;
+                final int[] delaySlot = {0};
 
-                    JsonObject new_obj = new JsonObject();
-                    new_obj.addProperty("date", date);
-                    new_obj.addProperty("action", action);
-                    JsonObject new_cmds = new JsonObject();
+                for (int i1 = 0; i1 < paymentsArr.size(); i1++) {
+                    JsonObject payment = paymentsArr.get(i1).getAsJsonObject();
+                    String paymentId = safeGetAsString(payment, "id");
+                    String player_str = safeGetAsString(payment, "player");
+                    String uuidStr = safeGetAsString(payment, "minecraft_uuid");
+                    JsonArray cmds = payment.get("cmds").getAsJsonArray();
 
                     String player_connected = check_online_player(uuidStr, player_str);
                     if (player_connected != null) {
                         player_str = player_connected;
                     }
+                    final String finalPlayerStr = player_str;
 
-                    List<String> cmds_failed = new ArrayList<>();
-                    boolean redo_cmd = false;
+                    JsonObject paymentUpdate = new JsonObject();
+                    paymentUpdate.addProperty("action", "payment");
+                    JsonObject new_cmds = new JsonObject();
+                    boolean pendingForThisPayment = false;
 
                     for (int i2 = 0; i2 < cmds.size(); i2++) {
                         JsonElement elem = cmds.get(i2);
@@ -134,56 +142,53 @@ public class T4SMain {
                         JsonObject cmds_obj = elem.getAsJsonObject();
                         String state = safeGetAsString(cmds_obj, "state");
                         String cmdId = safeGetAsString(cmds_obj, "id");
-                        String cmdStr = safeGetAsString(cmds_obj, "str").replace("{minecraft_username}", player_str);
+                        String cmdStr = safeGetAsString(cmds_obj, "str").replace("{minecraft_username}", finalPlayerStr);
 
-                        if (state.equals("1")) {
-                            if (player_connected == null) {
-                                cmds_failed.add(cmdId);
-                                redo_cmd = true;
-                            } else {
-                                ServerLifecycleHooks.getCurrentServer().execute(() -> {
-                                    CommandSourceStack source = ServerLifecycleHooks.getCurrentServer().createCommandSourceStack();
-                                    ServerLifecycleHooks.getCurrentServer().getCommands().performCommand(source, cmdStr);
+                        boolean canExecute = state.equalsIgnoreCase("Execute")
+                                || (state.equalsIgnoreCase("Must be online") && player_connected != null);
+
+                        if (canExecute) {
+                            final String cmdToRun = cmdStr;
+                            final long delayMs = delaySlot[0] * COMMAND_DELAY_MS;
+                            delaySlot[0]++;
+                            COMMAND_SCHEDULER.schedule(() -> {
+                                var server = ServerLifecycleHooks.getCurrentServer();
+                                if (server == null) return;
+                                server.execute(() -> {
+                                    try {
+                                        CommandSourceStack source = server.createCommandSourceStack();
+                                        server.getCommands().performCommand(source, cmdToRun);
+                                    } catch (Exception e) {
+                                        LOGGER.warn("Failed to execute command: {}", cmdToRun);
+                                    }
                                 });
-                                new_cmds.addProperty(cmdId, 3);
-                                update_now = true;
-                            }
-                        }
-                        // For state "0", execute without checking for online presence
-                        else if (state.equals("0")) {
-                            ServerLifecycleHooks.getCurrentServer().execute(() -> {
-                                CommandSourceStack source = ServerLifecycleHooks.getCurrentServer().createCommandSourceStack();
-                                ServerLifecycleHooks.getCurrentServer().getCommands().performCommand(source, cmdStr);
-                            });
-                            new_cmds.addProperty(cmdId, 3);
-                            update_now = true;
+                            }, delayMs, TimeUnit.MILLISECONDS);
+                            new_cmds.addProperty(cmdId, "Executed");
+                            hasExecutedCommands = true;
                         } else {
-                            new_cmds.addProperty(cmdId, 14);
-                            cmds_failed.add(cmdId);
-                            redo_cmd = true;
+                            new_cmds.addProperty(cmdId, "Not Executed");
+                            pendingForThisPayment = true;
                         }
                     }
-                    new_obj.add("cmds", new_cmds);
+                    paymentUpdate.add("cmds", new_cmds);
+                    updatePayload.add(paymentId, paymentUpdate);
 
-                    if (redo_cmd) {
-                        new_obj.addProperty("status", 14);
-                    } else {
-                        new_obj.addProperty("status", 3);
-                        ServerPlayer player = getPlayer(player_str);
+                    if (!pendingForThisPayment && player_connected != null) {
+                        ServerPlayer player = getPlayer(finalPlayerStr);
                         if (player != null) {
                             player.sendMessage(new TextComponent(Tip4ServConfig.getMessageSuccess()), player.getUUID());
                         }
                     }
-                    new_json.add(id, new_obj);
                 }
 
-                lastResponse = new_json.toString();
-                boolean finalUpdate_now = update_now;
-                writeResponseFileAsync(lastResponse).thenRun(() -> {
-                    if (finalUpdate_now) {
-                        sendResponse();
-                    }
-                });
+                lastResponse = updatePayload.toString();
+                if (hasExecutedCommands) {
+                    writeResponseFileAsync(lastResponse).thenRun(() -> {
+                        if (httpPostUpdate(lastResponse)) {
+                            clearResponseFile();
+                        }
+                    });
+                }
             } catch (Exception e) {
                 if (log)
                     LOGGER.error("Error while checking payments: {}", e.getMessage());
@@ -262,68 +267,85 @@ public class T4SMain {
         }
     }
 
-    public static void sendResponse() {
+    public static String httpGetCommands() {
         if (Tip4ServKey.getApiKey().isEmpty() || Tip4ServKey.getServerID().isEmpty() || Tip4ServKey.getPrivateKey().isEmpty()) {
-            return;
+            return null;
         }
         try {
-            long timestamp = new Date().getTime();
-            URL url = new URL(API_URL);
-            String macSignature = calculateHMAC(Tip4ServKey.getServerID(), Tip4ServKey.getPublicKey(), Tip4ServKey.getPrivateKey(), timestamp);
-            String fileContent = readResponseFile();
-            String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
+            long timestamp = System.currentTimeMillis() / 1000;
+            String hmac = calculateHMAC(Tip4ServKey.getServerID(), Tip4ServKey.getPublicKey(), Tip4ServKey.getPrivateKey(), timestamp);
+            URL url = new URL(API_BASE_URL + Tip4ServKey.getServerID() + "/commands?time=" + timestamp);
 
             HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
-            connection.setRequestMethod("POST");
-            connection.addRequestProperty("Authorization", macSignature);
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setDoOutput(true);
-            try (var outputStream = connection.getOutputStream()) {
-                outputStream.write(jsonEncoded.getBytes());
-                outputStream.flush();
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("Authorization", "Bearer SERVER_KEY:" + hmac);
+
+            if (connection.getResponseCode() == 200) {
+                return readStream(connection.getInputStream());
             }
-            StringBuilder response = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    response.append(line);
-                }
-            }
-            sendHttpRequest("update");
-        } catch (Exception ignored) {
+            return null;
+        } catch (Exception e) {
+            return null;
         }
     }
 
-    public static String sendHttpRequest(String cmd) {
+    public static boolean httpPostUpdate(String jsonPayload) {
         if (Tip4ServKey.getApiKey().isEmpty() || Tip4ServKey.getServerID().isEmpty() || Tip4ServKey.getPrivateKey().isEmpty()) {
-            return "false";
+            return false;
         }
         try {
-            long timestamp = new Date().getTime();
-            String fileContent = readResponseFile();
-            String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
-            String macSignature = calculateHMAC(Tip4ServKey.getServerID(), Tip4ServKey.getPublicKey(), Tip4ServKey.getPrivateKey(), timestamp);
-            String urlString = API_URL + "?id=" + Tip4ServKey.getServerID() + "&time=" + timestamp + "&json=" + jsonEncoded + "&get_cmd=" + cmd;
-            URL url = new URL(urlString);
+            long timestamp = System.currentTimeMillis() / 1000;
+            String hmac = calculateHMAC(Tip4ServKey.getServerID(), Tip4ServKey.getPublicKey(), Tip4ServKey.getPrivateKey(), timestamp);
+            URL url = new URL(API_BASE_URL + Tip4ServKey.getServerID() + "/commands?time=" + timestamp);
+
             HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
-            connection.addRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:25.0) Gecko/20100101 Firefox/25.0");
-            connection.addRequestProperty("Accept", "application/json");
-            connection.addRequestProperty("Authorization", macSignature);
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.setRequestProperty("Accept", "application/json");
             connection.setRequestProperty("Content-Type", "application/json");
-            StringBuilder response = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    response.append(line);
-                }
+            connection.setRequestProperty("Authorization", "Bearer SERVER_KEY:" + hmac);
+            connection.setDoOutput(true);
+
+            try (OutputStream os = connection.getOutputStream()) {
+                os.write(jsonPayload.getBytes(StandardCharsets.UTF_8));
+                os.flush();
             }
-            if (cmd.equals("update")) {
-                clearResponseFile();
-            }
-            return response.toString();
+
+            return connection.getResponseCode() == 200;
         } catch (Exception e) {
-            return "false";
+            return false;
         }
+    }
+
+    public static void sendPendingUpdates() {
+        String pending = readResponseFile();
+        if (pending == null || pending.trim().isEmpty()) {
+            return;
+        }
+        if (httpPostUpdate(pending)) {
+            clearResponseFile();
+        }
+    }
+
+    private static String readStream(InputStream is) {
+        if (is == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+        } catch (IOException ignored) {
+        }
+        return sb.toString();
     }
 
     public static void checkConnection(Entity entity) {
@@ -338,18 +360,18 @@ public class T4SMain {
             return;
         }
 
-        String response = sendHttpRequest("no");
+        boolean connected = httpGetCommands() != null;
         if (entity == null) {
-            if (response.contains("[Tip4serv error]")) {
-                LOGGER.error("Error while connecting to Tip4Serv API: " + response);
+            if (connected) {
+                LOGGER.info("Successfully connected to Tip4Serv API");
             } else {
-                LOGGER.info("Connection to Tip4Serv API: " + response);
+                LOGGER.error("Could not connect to Tip4Serv API.");
             }
         } else {
-            if (response.contains("[Tip4serv error]")) {
-                entity.sendMessage(new TextComponent("Error while connecting to Tip4Serv API: " + response), entity.getUUID());
+            if (connected) {
+                entity.sendMessage(new TextComponent("Successfully connected to Tip4Serv API"), entity.getUUID());
             } else {
-                entity.sendMessage(new TextComponent("Connection to Tip4Serv AP: " + response), entity.getUUID());
+                entity.sendMessage(new TextComponent("Could not connect to Tip4Serv API."), entity.getUUID());
             }
         }
     }
