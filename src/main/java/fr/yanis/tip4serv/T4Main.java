@@ -31,12 +31,10 @@ import javax.crypto.spec.SecretKeySpec;
 import javax.net.ssl.HttpsURLConnection;
 import java.io.*;
 import java.net.URL;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -48,12 +46,18 @@ public class T4Main {
     private static MinecraftServer server;
     private ScheduledExecutorService scheduler;
     private static final String HMAC_SHA1_ALGORITHM = "HmacSHA256";
-    private static String key_path = "config/tip4serv/tip4serv.key";
     private static String response_path = "config/tip4serv/response.json";
     private static T4Main pluginInstance;
     public static String lastResponse = "";
 
-    private static final String API_URL = "https://api.tip4serv.com/payments_api_v2.php";
+    private static final String API_BASE_URL = "https://api.tip4serv.com/v1/store/server/";
+    private static final String USER_AGENT = "Tip4Serv-NeoForge/1.21";
+    private static final long COMMAND_DELAY_MS = 1000L;
+    private static final ScheduledExecutorService COMMAND_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "Tip4Serv-CommandScheduler");
+        t.setDaemon(true);
+        return t;
+    });
 
     public T4Main(IEventBus modEventBus, ModContainer modContainer) {
         pluginInstance = this;
@@ -66,135 +70,112 @@ public class T4Main {
         LOGGER.info("[Tip4Serv] Plugin initialized");
     }
 
-    public void launchRequest(boolean log){
+    public void launchRequest(boolean log) {
+        if (server == null) return;
         try {
             String key_str = Tip4ServKey.getApiKey();
             if (!key_str.contains(".")) {
-                LOGGER.info("[Tip4Serv] Please provide a correct apiKey in config/tip4serv/tip4serv.key file");
+                if (log) LOGGER.warn("[Tip4Serv] Please provide a correct apiKey in config/tip4serv/tip4serv.key file");
                 return;
             }
 
-            String Json_string = sendHttpRequest("yes");
+            sendPendingUpdates();
 
-            if (Json_string.contains("[Tip4serv info] No pending payments found")) {
-                return;
-            } else if (Json_string.contains("[Tip4serv error]")) {
-                if (log)
-                    LOGGER.info(Json_string);
-                return;
-            } else if (Json_string.contains("[Tip4serv info]")) {
-                if(log)
-                    LOGGER.info(Json_string);
-                return;
-            } else if (Json_string.isEmpty() || Json_string.equals("false")) {
-                if (log)
-                    LOGGER.info("[Tip4Serv] No payments to process");
+            String json_string = httpGetCommands();
+            if (json_string == null) {
+                if (log) LOGGER.warn("[Tip4Serv] Could not reach the Tip4Serv API.");
                 return;
             }
 
-            JsonArray infosArr = JsonParser.parseString(Json_string).getAsJsonArray();
-            if (log)
-                LOGGER.info("[Tip4Serv] Processing " + infosArr.size() + " payments");
-            JsonObject new_json = new JsonObject();
-            boolean update_now = false;
+            JsonElement parsed = JsonParser.parseString(json_string);
+            if (!parsed.isJsonArray()) {
+                if (log) LOGGER.info("[Tip4Serv] No pending payments found.");
+                return;
+            }
+            JsonArray paymentsArr = parsed.getAsJsonArray();
+            if (paymentsArr.size() == 0) {
+                clearResponseFile();
+                if (log) LOGGER.info("[Tip4Serv] No pending payments found.");
+                return;
+            }
 
-            for (int i1 = 0; i1 < infosArr.size(); i1++) {
-                JsonObject infos_obj = (JsonObject) infosArr.get(i1);
-                String id = safeGetAsString(infos_obj, "id");
-                String action = safeGetAsString(infos_obj, "action");
-                String player_str = safeGetAsString(infos_obj, "player");
-                String uuidStr = safeGetAsString(infos_obj, "uuid");
-                JsonArray cmds = infos_obj.get("cmds").getAsJsonArray();
-                String date = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+            JsonObject updatePayload = new JsonObject();
+            boolean hasExecutedCommands = false;
+            final int[] delaySlot = {0};
 
-                JsonObject new_obj = new JsonObject();
-
-                if (log)
-                    LOGGER.info("[Tip4Serv] Processing payment ID " + id + " for player " + player_str);
-
-                new_obj.addProperty("date", date);
-                new_obj.addProperty("action", action);
-                JsonObject new_cmds = new JsonObject();
+            for (int i1 = 0; i1 < paymentsArr.size(); i1++) {
+                JsonObject payment = paymentsArr.get(i1).getAsJsonObject();
+                String paymentId = safeGetAsString(payment, "id");
+                String player_str = safeGetAsString(payment, "player");
+                String uuidStr = safeGetAsString(payment, "minecraft_uuid");
+                JsonArray cmds = payment.get("cmds").getAsJsonArray();
 
                 String player_connected = check_online_player(uuidStr, player_str);
-
-                if (log)
-                    LOGGER.info("[Tip4Serv] Player connection status: " + (player_connected != null ? "Online" : "Offline"));
-
                 if (player_connected != null) player_str = player_connected;
+                final String finalPlayerStr = player_str;
 
-                List<String> cmds_failed = new ArrayList<>();
-                boolean redo_cmd = false;
-                boolean hasSuccessfulCmd = false;
+                JsonObject paymentUpdate = new JsonObject();
+                paymentUpdate.addProperty("action", "payment");
+                JsonObject new_cmds = new JsonObject();
+                boolean pendingForThisPayment = false;
 
                 for (int i2 = 0; i2 < cmds.size(); i2++) {
                     JsonElement elem = cmds.get(i2);
-
-                    if (!elem.isJsonObject()) {
-                        continue;
-                    }
-
+                    if (!elem.isJsonObject()) continue;
                     JsonObject cmds_obj = elem.getAsJsonObject();
-
                     String state = safeGetAsString(cmds_obj, "state");
-                    String cmd_id = safeGetAsString(cmds_obj, "id");
-                    String cmd_str = safeGetAsString(cmds_obj, "str").replace("{minecraft_username}", player_str);
+                    String cmdId = safeGetAsString(cmds_obj, "id");
+                    String cmdStr = safeGetAsString(cmds_obj, "str").replace("{minecraft_username}", finalPlayerStr);
 
-                    if (state.equals("1")) {
-                        if (player_connected == null) {
-                            cmds_failed.add(cmd_id);
-                            redo_cmd = true;
-                        } else {
-                            server.execute(() -> {
-                                server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), cmd_str);
+                    boolean canExecute = state.equalsIgnoreCase("Execute")
+                            || (state.equalsIgnoreCase("Must be online") && player_connected != null);
+
+                    if (canExecute) {
+                        final String cmdToRun = cmdStr;
+                        final long delayMs = delaySlot[0] * COMMAND_DELAY_MS;
+                        delaySlot[0]++;
+                        COMMAND_SCHEDULER.schedule(() -> {
+                            MinecraftServer srv = server;
+                            if (srv == null) return;
+                            srv.execute(() -> {
+                                try {
+                                    srv.getCommands().performPrefixedCommand(srv.createCommandSourceStack(), cmdToRun);
+                                } catch (Exception e) {
+                                    LOGGER.warn("[Tip4Serv] Failed to execute command: {}", cmdToRun);
+                                }
                             });
-                            new_cmds.addProperty(cmd_id, 3);
-                            update_now = true;
-                            hasSuccessfulCmd = true;
-                        }
-                    } else if (state.equals("0")) {
-                        server.execute(() -> {
-                            server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), cmd_str);
-                        });
-                        new_cmds.addProperty(cmd_id, 3);
-                        update_now = true;
-                        hasSuccessfulCmd = true;
+                        }, delayMs, TimeUnit.MILLISECONDS);
+                        new_cmds.addProperty(cmdId, "Executed");
+                        hasExecutedCommands = true;
                     } else {
-                        new_cmds.addProperty(cmd_id, 14);
-                        cmds_failed.add(cmd_id);
-                        redo_cmd = true;
+                        new_cmds.addProperty(cmdId, "Not Executed");
+                        pendingForThisPayment = true;
                     }
                 }
+                paymentUpdate.add("cmds", new_cmds);
+                updatePayload.add(paymentId, paymentUpdate);
 
-                // Envoyer le message de succès au joueur s'il est connecté et a reçu des commandes
-                if (player_connected != null && hasSuccessfulCmd) {
-                    String finalPlayerName = player_str;
+                if (!pendingForThisPayment && player_connected != null) {
+                    final String finalName = finalPlayerStr;
                     server.execute(() -> {
-                        ServerPlayer player = server.getPlayerList().getPlayerByName(finalPlayerName);
+                        ServerPlayer player = server.getPlayerList().getPlayerByName(finalName);
                         if (player != null) {
-                            String successMessage = T4Config.getMessageSuccess();
-                            player.sendSystemMessage(Component.literal(successMessage));
+                            player.sendSystemMessage(Component.literal(T4Config.getMessageSuccess()));
                         }
                     });
                 }
-
-                new_obj.add("cmds", new_cmds);
-                new_obj.addProperty("status", redo_cmd ? 14 : 3);
-                new_json.add(id, new_obj);
             }
 
-            lastResponse = new_json.toString();
-            boolean finalUpdate_now = update_now;
-
-            writeResponseFileAsync(lastResponse).thenRun(() -> {
-                if (finalUpdate_now) {
-                    sendResponse();
-                }
-            });
-
+            lastResponse = updatePayload.toString();
+            if (hasExecutedCommands) {
+                writeResponseFileAsync(lastResponse).thenRun(() -> {
+                    if (httpPostUpdate(lastResponse)) {
+                        clearResponseFile();
+                    }
+                });
+            }
         } catch (Exception e) {
-            LOGGER.info("[Tip4Serv] Error in scheduled task:");
-            e.printStackTrace();
+            if (log) LOGGER.error("[Tip4Serv] Error while checking payments: {}", e.getMessage());
         }
     }
 
@@ -202,9 +183,7 @@ public class T4Main {
     public void onServerStarting(ServerStartingEvent event) {
         server = event.getServer();
 
-        Tip4ServKey.loadKey().thenRun(() -> {
-            launchRequest(true);
-        });
+        Tip4ServKey.loadKey().thenRun(() -> launchRequest(true));
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "Tip4Serv-Scheduler");
@@ -212,9 +191,7 @@ public class T4Main {
             return t;
         });
 
-        scheduler.scheduleAtFixedRate(() -> {
-            launchRequest(false);
-        }, T4Config.getInterval(), T4Config.getInterval(), TimeUnit.MINUTES);
+        scheduler.scheduleAtFixedRate(() -> launchRequest(false), T4Config.getInterval(), T4Config.getInterval(), TimeUnit.MINUTES);
 
         LOGGER.info("[Tip4Serv] Scheduler started successfully");
     }
@@ -272,14 +249,11 @@ public class T4Main {
         Tip4ServKey.loadKey().thenRun(() -> {
             String key_str = Tip4ServKey.getApiKey();
             if (!key_str.contains(".")) {
-                source.sendFailure(Component.literal("§c[Tip4serv error] please paste your KEY (see MY SERVERS on Tip4serv.com) in the tip4serv/tip4serv.key file of your server and retype the command.§r"));
+                source.sendFailure(Component.literal("§c[Tip4serv error] please paste your KEY (see MY SERVERS on Tip4serv.com) in the config/tip4serv/tip4serv.key file of your server and retype the command.§r"));
+            } else if (httpGetCommands() != null) {
+                source.sendSuccess(() -> Component.literal("§a[Tip4Serv] Successfully connected to Tip4Serv API!§r"), true);
             } else {
-                String lortu = sendHttpRequest(key_str);
-                if (lortu.contains("Tip4serv error")) {
-                    source.sendFailure(Component.literal("§c" + lortu + "§r"));
-                } else {
-                    source.sendSuccess(() -> Component.literal("§a" + lortu + "§r"), true);
-                }
+                source.sendFailure(Component.literal("§c[Tip4serv error] Could not connect to Tip4Serv API. Check your key in config/tip4serv/tip4serv.key.§r"));
             }
         });
 
@@ -294,8 +268,7 @@ public class T4Main {
             Tip4ServKey.loadKey().thenRun(() -> T4Main.getInstance().launchRequest(true));
             source.sendSuccess(() -> Component.literal("§a[Tip4Serv] Configuration reloaded§r"), true);
         } catch (Exception e) {
-            LOGGER.info("[Tip4Serv] Error reloading config:");
-            e.printStackTrace();
+            LOGGER.error("[Tip4Serv] Error reloading config: {}", e.getMessage());
             source.sendFailure(Component.literal("§c[Tip4serv error] " + e + "§r"));
         }
 
@@ -339,72 +312,85 @@ public class T4Main {
         return null;
     }
 
-    public static void sendResponse() {
+    public static String httpGetCommands() {
         if (Tip4ServKey.getApiKey().isEmpty() || Tip4ServKey.getServerID().isEmpty() || Tip4ServKey.getPrivateKey().isEmpty()) {
-            return;
+            return null;
         }
         try {
-            long timestamp = new Date().getTime();
-            URL url = new URL(API_URL);
-            String macSignature = calculateHMAC(Tip4ServKey.getServerID(), Tip4ServKey.getPublicKey(), Tip4ServKey.getPrivateKey(), timestamp);
-            String fileContent = readResponseFile();
-            String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
+            long timestamp = System.currentTimeMillis() / 1000;
+            String hmac = calculateHMAC(Tip4ServKey.getServerID(), Tip4ServKey.getPublicKey(), Tip4ServKey.getPrivateKey(), timestamp);
+            URL url = new URL(API_BASE_URL + Tip4ServKey.getServerID() + "/commands?time=" + timestamp);
 
             HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
-            connection.setRequestMethod("POST");
-            connection.addRequestProperty("Authorization", macSignature);
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setDoOutput(true);
-            try (var outputStream = connection.getOutputStream()) {
-                outputStream.write(jsonEncoded.getBytes());
-                outputStream.flush();
-            }
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("Authorization", "Bearer SERVER_KEY:" + hmac);
 
-            int responseCode = connection.getResponseCode();
-            StringBuilder response = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    response.append(line);
-                }
+            if (connection.getResponseCode() == 200) {
+                return readStream(connection.getInputStream());
             }
-            sendHttpRequest("update");
+            return null;
         } catch (Exception e) {
-            LOGGER.info(e.getMessage());
+            return null;
         }
     }
 
-    public static String sendHttpRequest(String cmd) {
+    public static boolean httpPostUpdate(String jsonPayload) {
         if (Tip4ServKey.getApiKey().isEmpty() || Tip4ServKey.getServerID().isEmpty() || Tip4ServKey.getPrivateKey().isEmpty()) {
-            return "false";
+            return false;
         }
         try {
-            long timestamp = new Date().getTime();
-            String fileContent = readResponseFile();
-            String jsonEncoded = URLEncoder.encode(fileContent.isEmpty() ? "{}" : fileContent, StandardCharsets.UTF_8);
-            String macSignature = calculateHMAC(Tip4ServKey.getServerID(), Tip4ServKey.getPublicKey(), Tip4ServKey.getPrivateKey(), timestamp);
-            String urlString = API_URL + "?id=" + Tip4ServKey.getServerID() + "&time=" + timestamp + "&json=" + jsonEncoded + "&get_cmd=" + cmd;
-            URL url = new URL(urlString);
+            long timestamp = System.currentTimeMillis() / 1000;
+            String hmac = calculateHMAC(Tip4ServKey.getServerID(), Tip4ServKey.getPublicKey(), Tip4ServKey.getPrivateKey(), timestamp);
+            URL url = new URL(API_BASE_URL + Tip4ServKey.getServerID() + "/commands?time=" + timestamp);
+
             HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
-            connection.addRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:25.0) Gecko/20100101 Firefox/25.0");
-            connection.addRequestProperty("Accept", "application/json");
-            connection.addRequestProperty("Authorization", macSignature);
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.setRequestProperty("Accept", "application/json");
             connection.setRequestProperty("Content-Type", "application/json");
-            StringBuilder response = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    response.append(line);
-                }
+            connection.setRequestProperty("Authorization", "Bearer SERVER_KEY:" + hmac);
+            connection.setDoOutput(true);
+
+            try (OutputStream os = connection.getOutputStream()) {
+                os.write(jsonPayload.getBytes(StandardCharsets.UTF_8));
+                os.flush();
             }
-            if (cmd.equals("update")) {
-                clearResponseFile();
-            }
-            int responseCode = connection.getResponseCode();
-            return response.toString();
+
+            return connection.getResponseCode() == 200;
         } catch (Exception e) {
-            return "false";
+            return false;
         }
+    }
+
+    public static void sendPendingUpdates() {
+        String pending = readResponseFile();
+        if (pending == null || pending.trim().isEmpty()) {
+            return;
+        }
+        if (httpPostUpdate(pending)) {
+            clearResponseFile();
+        }
+    }
+
+    private static String readStream(InputStream is) {
+        if (is == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+        } catch (IOException ignored) {
+        }
+        return sb.toString();
     }
 
     public static String calculateHMAC(String server_id, String public_key, String private_key, Long timestamp) {
