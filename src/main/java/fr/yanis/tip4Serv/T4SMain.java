@@ -12,7 +12,7 @@ import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.Player;
 
-import javax.inject.Inject;
+import com.google.inject.Inject;
 import java.io.*;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
